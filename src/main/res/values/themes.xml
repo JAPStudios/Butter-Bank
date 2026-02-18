@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.ButterBank" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#0F766E</item>
+        <item name="colorPrimaryVariant">#115E59</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="android:statusBarColor">#115E59</item>
+    </style>
+</resources>

@@ -1,7 +1,7 @@
-// Account.kt
+package com.example.butterbank
 
 data class Account(
     val accountNumber: String,
     val accountType: String,
-    val balance: Double
+    var balance: Double
 )

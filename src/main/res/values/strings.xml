@@ -1,0 +1,23 @@
+<resources>
+    <string name="app_name">Butter Bank</string>
+    <string name="subtitle">Hybrid account prototype: cash + credit in one place.</string>
+
+    <string name="account_line">%1$s %2$s\nCash Balance: %3$s</string>
+    <string name="credit_line">Credit Used: %1$s\nCredit Available: %2$s of %3$s</string>
+
+    <string name="add_funds_button">Add $100 Cash</string>
+    <string name="spend_button">Spend $50 (Cash then Credit)</string>
+    <string name="repay_credit_button">Repay $25 Credit from Cash</string>
+
+    <string name="add_funds_success">Added %1$s cash.</string>
+    <string name="spend_success">Spent %1$s successfully.</string>
+    <string name="repay_credit_success">Repaid %1$s of credit from cash.</string>
+
+    <string name="operation_failed">Operation failed.</string>
+    <string name="spend_failed">Spend failed: not enough cash + credit.</string>
+    <string name="repay_credit_failed">Repayment failed: insufficient cash or no credit due.</string>
+
+    <string name="status_default">Tap an action to update account state.</string>
+    <string name="history_title">Recent transactions</string>
+    <string name="no_transactions">No transactions yet.</string>
+</resources>
