@@ -1,164 +1,182 @@
-
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description"
-        content="Help fund Butter Bank's proposed fee-free
-        cryptocurrency and digital wallet system.">
-  <title>Fund Butter Bank | JAPStudios</title>
+  <meta name="theme-color" content="#18271f">
+  <meta name="description" content="Support development of Butter Bank's proposed coin and digital wallet system, designed to let users make payments without user-facing transaction fees.">
+  <title>Fund Butter Bank — JAPStudios</title>
   <style>
-    body {
-      margin: 0;
-      font-family: Arial, sans-serif;
-      line-height: 1.6;
-      background: #f5f3eb;
-      color: #242820;
+    :root {
+      color-scheme: light;
+      --ink: #17251d;
+      --muted: #5b685f;
+      --paper: #f4f5ef;
+      --card: #fff;
+      --green: #244b35;
+      --green-dark: #18271f;
+      --lime: #d6f17b;
+      --line: #dfe5dc;
+      --warning: #fff4d6;
     }
-    main {
-      max-width: 760px;
-      margin: 48px auto;
-      padding: 28px;
-    }
-    section {
-      background: white;
-      padding: 28px;
-      border-radius: 14px;
-      margin: 20px 0;
-    }
-    h1, h2 { line-height: 1.2; }
-    .address {
-      overflow-wrap: anywhere;
-      padding: 14px;
-      background: #f1f1ed;
-      border-radius: 8px;
-      font-family: monospace;
-    }
-    button {
-      padding: 12px 18px;
-      border: 0;
-      border-radius: 7px;
-      cursor: pointer;
-      background: #293d2c;
-      color: white;
-      font-size: 1rem;
-    }
-    .notice { font-size: 0.9rem; }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.65 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    a { color: inherit; }
+    .wrap { width: min(1080px, calc(100% - 36px)); margin: 0 auto; }
+    header { background: var(--green-dark); color: #fff; }
+    .nav { min-height: 76px; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+    .brand { font-weight: 800; letter-spacing: -.03em; font-size: 1.12rem; }
+    .brand span { color: var(--lime); }
+    .nav a { text-decoration: none; color: #e8eee7; font-size: .93rem; }
+    .hero { padding: clamp(54px, 9vw, 105px) 0 76px; background: radial-gradient(ellipse at 85% 10%, #365840 0, transparent 42%), var(--green-dark); color: #fff; }
+    .eyebrow { color: var(--lime); text-transform: uppercase; font-size: .76rem; font-weight: 800; letter-spacing: .15em; }
+    h1 { max-width: 800px; margin: 18px 0; font-size: clamp(2.5rem, 7vw, 5.1rem); line-height: .99; letter-spacing: -.065em; }
+    .hero p { max-width: 700px; color: #dbe5dc; font-size: clamp(1.05rem, 2vw, 1.25rem); }
+    .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+    .button { display: inline-flex; align-items: center; justify-content: center; border-radius: 9px; padding: 13px 18px; font-weight: 750; text-decoration: none; border: 1px solid transparent; cursor: pointer; font: inherit; font-weight: 750; }
+    .primary { background: var(--lime); color: var(--green-dark); }
+    .secondary { color: #fff; border-color: #617466; background: transparent; }
+    main { padding: 34px 0 70px; }
+    .grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(300px, .9fr); gap: 22px; align-items: start; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: clamp(22px, 4vw, 34px); box-shadow: 0 10px 28px #17251d08; }
+    .card + .card { margin-top: 22px; }
+    h2 { font-size: clamp(1.45rem, 3vw, 2rem); letter-spacing: -.035em; line-height: 1.15; margin: 0 0 12px; }
+    h3 { margin: 22px 0 7px; font-size: 1rem; }
+    p { margin: 0 0 14px; }
+    .muted { color: var(--muted); }
+    .tag { display: inline-block; border-radius: 99px; padding: 5px 10px; background: #edf2e7; color: var(--green); font-size: .78rem; font-weight: 800; }
+    .wallet-box { border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 18px 0; background: #f8faf6; }
+    .wallet-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .meta-label { display: block; color: var(--muted); font-size: .78rem; font-weight: 750; margin-bottom: 3px; }
+    .meta-value { font-weight: 750; overflow-wrap: anywhere; }
+    .address { padding: 13px; margin: 12px 0; border-radius: 8px; background: #eaf0e7; font: .88rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+    button:disabled { opacity: .48; cursor: not-allowed; }
+    .status { min-height: 1.5em; font-size: .9rem; color: var(--green); }
+    .notice { border-radius: 10px; background: var(--warning); padding: 14px 16px; font-size: .9rem; }
+    ul { padding-left: 21px; margin-bottom: 0; }
+    li { padding: 4px 0; }
+    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 22px; }
+    .step { background: #f6f8f3; border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+    .step b { display: block; margin-bottom: 5px; }
+    .step p { color: var(--muted); font-size: .91rem; margin: 0; }
+    .footer { border-top: 1px solid var(--line); padding-top: 24px; color: var(--muted); font-size: .9rem; }
+    .footer a { color: var(--green); font-weight: 700; }
+    @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } .steps { grid-template-columns: 1fr; } .nav { min-height: 64px; } .wallet-meta { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
-<main>
-  <p>JAPStudios / Butter Bank</p>
+  <header>
+    <div class="wrap nav">
+      <div class="brand">BUTTER <span>BANK</span></div>
+      <a href="https://github.com/JAPStudios/Butter-Bank">View source on GitHub ↗</a>
+    </div>
+  </header>
 
-  <h1>Help Build a Fee-Free Payment System</h1>
-
-  <p>
-    Butter Bank is developing the concept for a new digital
-    coin and wallet system designed to make everyday payments
-    accessible without transaction fees charged to users.
-  </p>
-
-  <p>
-    Contributions will help finance the engineering, research,
-    security testing, and infrastructure needed to develop
-    and evaluate the proposed system.
-  </p>
-
-  <section>
-    <h2>Fund Development</h2>
-
-    <p>
-      Cryptocurrency contributions can support the development
-      of Butter Bank. Before contributing, review the intended
-      use of funds and the current project status.
-    </p>
-
-    <h3>Accepted cryptocurrency</h3>
-    <p>CONFIGURE: Select a supported cryptocurrency.</p>
-
-    <h3>Receiving network</h3>
-    <p>CONFIGURE: Specify the exact supported network.</p>
-
-    <h3>Contribution address</h3>
-    <p class="address" id="wallet-address">
-      Coinbase receiving address not configured.
-    </p>
-
-    <button id="copy-address" disabled>
-      Copy receiving address
-    </button>
-
-    <p id="copy-status" role="status"></p>
+  <section class="hero">
+    <div class="wrap">
+      <div class="eyebrow">An open development initiative by JAPStudios</div>
+      <h1>Payments without user-facing transaction fees.</h1>
+      <p>Help fund research and development for a proposed digital coin and wallet system intended to make everyday digital payments more accessible. Contributions support the work required to design, build, test, and secure the system.</p>
+      <div class="actions">
+        <a class="button primary" href="#contribute">Support development</a>
+        <a class="button secondary" href="#plan">Review the development plan</a>
+      </div>
+    </div>
   </section>
 
-  <section>
-    <h2>What Contributions Will Fund</h2>
-    <ul>
-      <li>Coin and wallet architecture development.</li>
-      <li>Transaction processing and fee-abstraction research.</li>
-      <li>Security audits and testing.</li>
-      <li>Prototype development and documentation.</li>
-      <li>Infrastructure and deployment preparation.</li>
-    </ul>
-    <p>
-      These are intended funding categories. Actual spending
-      and development progress should be reported transparently.
-    </p>
-  </section>
+  <main class="wrap">
+    <div class="grid">
+      <div>
+        <section class="card" id="plan">
+          <span class="tag">Project status: in development</span>
+          <h2 style="margin-top:16px">What this funding supports</h2>
+          <p class="muted">The goal is to develop a coin and wallet experience where users are not charged a transaction fee for ordinary payments. The technical model and funding needed to sustainably cover network and operating costs must be engineered and validated.</p>
+          <ul>
+            <li>Coin and wallet architecture, prototypes, and integration.</li>
+            <li>Research into sponsored transactions and fee-abstraction options.</li>
+            <li>Security reviews, testing, and independent audit preparation.</li>
+            <li>Documentation, deployment tooling, and reliability testing.</li>
+          </ul>
+          <div class="notice" style="margin-top:20px">This is a development proposal, not a claim that a production-ready fee-free network already exists. Blockchain network fees and operating costs may still exist even when the user is not charged directly.</div>
+        </section>
 
-  <section>
-    <h2>Important Contribution Information</h2>
-    <p class="notice">
-      Contributions are for project development. Unless a
-      separate written agreement explicitly states otherwise,
-      contributors should not expect a refund, coin allocation,
-      ownership interest, or financial return.
-    </p>
-    <p class="notice">
-      Cryptocurrency transfers may be irreversible and may
-      incur network fees. Verify the asset, receiving address,
-      and network before sending funds.
-    </p>
-  </section>
+        <section class="card">
+          <h2>How contributions will be handled</h2>
+          <p>Funds are intended for the project work described on this page. JAPStudios should publish updates on development progress and actual spending as the project advances.</p>
+          <p class="muted">A detailed budget, fundraising target, and dated milestones have not been specified on this page. They should be published once established rather than presenting estimates as confirmed figures.</p>
+        </section>
+      </div>
 
-  <p>
-    Follow development:
-    <a href="https://github.com/JAPStudios/Butter-Bank">
-      Butter Bank on GitHub
-    </a>
-  </p>
-</main>
+      <aside>
+        <section class="card" id="contribute">
+          <h2>Contribute cryptocurrency</h2>
+          <p class="muted">Use only the asset and network shown below. Confirm the details in Coinbase before sending.</p>
+          <div class="wallet-box">
+            <div class="wallet-meta">
+              <div><span class="meta-label">Accepted asset</span><span class="meta-value" id="asset">Not configured</span></div>
+              <div><span class="meta-label">Network</span><span class="meta-value" id="network">Not configured</span></div>
+            </div>
+            <h3>Verified receiving address</h3>
+            <div class="address" id="wallet-address">Contributions are not enabled until a verified Coinbase receiving address is configured.</div>
+            <button class="button primary" id="copy-address" type="button" disabled>Copy receiving address</button>
+            <p class="status" id="copy-status" role="status" aria-live="polite"></p>
+          </div>
+          <div class="notice">Crypto transfers may be irreversible. Sending an unsupported asset or using the wrong network can result in permanent loss. Check the address, asset, and network before confirming a transfer.</div>
+          <p class="muted" style="font-size:.88rem;margin-top:16px">No wallet recovery phrase or private key is ever needed to contribute. Never share either with anyone.</p>
+        </section>
+      </aside>
+    </div>
 
-<script>
-  // Replace these values only after verifying the
-  // Coinbase receiving address and its supported network.
-  const CONFIG = {
-    asset: "",
-    network: "",
-    address: ""
-  };
+    <section class="card" style="margin-top:22px">
+      <h2>Before contributing</h2>
+      <div class="steps">
+        <div class="step"><b>1. Check the project</b><p>Read the public source repository and review the current development status.</p></div>
+        <div class="step"><b>2. Verify the payment details</b><p>Confirm the asset, network, and receiving address independently before sending.</p></div>
+        <div class="step"><b>3. Keep the transaction record</b><p>Save the transaction ID and amount for personal records and follow-up questions.</p></div>
+      </div>
+      <p class="muted" style="margin-top:20px;font-size:.9rem">Unless a separate written agreement states otherwise, contributions do not promise a refund, token allocation, ownership interest, or financial return. This page is not investment advice. The legal and tax treatment of contributions depends on the facts and applicable law.</p>
+    </section>
 
-  const validAddress = CONFIG.address.trim().length > 0;
+    <footer class="footer">
+      <p><strong>Butter Bank · JAPStudios</strong></p>
+      <p>Review the source code and follow development on <a href="https://github.com/JAPStudios/Butter-Bank">GitHub</a>.</p>
+    </footer>
+  </main>
 
-  if (validAddress && CONFIG.asset && CONFIG.network) {
-    document.getElementById("wallet-address").textContent =
-      CONFIG.address;
+  <script>
+    // Configure only after verifying this asset, network, and address in Coinbase.
+    // Never put a seed phrase, private key, or API secret in this public file.
+    const CONFIG = Object.freeze({
+      asset: "",
+      network: "",
+      address: ""
+    });
 
-    document.getElementById("copy-address").disabled = false;
-  }
+    const asset = CONFIG.asset.trim();
+    const network = CONFIG.network.trim();
+    const address = CONFIG.address.trim();
+    const configured = Boolean(asset && network && address);
 
-  document.getElementById("copy-address")
-    .addEventListener("click", async () => {
+    document.getElementById("asset").textContent = asset || "Not configured";
+    document.getElementById("network").textContent = network || "Not configured";
+    document.getElementById("wallet-address").textContent = configured
+      ? address
+      : "Contributions are not enabled until a verified Coinbase receiving address is configured.";
+
+    const copyButton = document.getElementById("copy-address");
+    copyButton.disabled = !configured;
+
+    copyButton.addEventListener("click", async () => {
+      const status = document.getElementById("copy-status");
+      if (!configured) return;
       try {
-        await navigator.clipboard.writeText(CONFIG.address);
-        document.getElementById("copy-status").textContent =
-          "Address copied. Verify it before sending.";
+        await navigator.clipboard.writeText(address);
+        status.textContent = "Address copied. Verify it again before sending.";
       } catch {
-        document.getElementById("copy-status").textContent =
-          "Copy unavailable. Select and copy the address manually.";
+        status.textContent = "Automatic copy failed. Select and copy the address manually.";
       }
     });
-</script>
+  </script>
 </body>
 </html>
