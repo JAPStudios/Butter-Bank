@@ -1,0 +1,11 @@
+{
+  "chain_id": "emberchain-devnet-1",
+  "symbol": "EMBER",
+  "decimals": 8,
+  "difficulty": 3,
+  "block_reward": 5000000000,
+  "genesis_allocations": {},
+  "host": "127.0.0.1",
+  "port": 8333,
+  "peers": []
+}
