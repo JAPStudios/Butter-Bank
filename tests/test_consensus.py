@@ -60,6 +60,14 @@ class BFTPrimitiveTests(unittest.TestCase):
         self.assertTrue(verify_proposal(proposal, self.validators, self.chain_id))
         tampered = dict(proposal, block_hash="cd" * 32)
         self.assertFalse(verify_proposal(tampered, self.validators, self.chain_id))
+        self.assertFalse(verify_proposal(
+            dict(proposal, block_hash=proposal["block_hash"].upper()),
+            self.validators, self.chain_id
+        ))
+        self.assertFalse(verify_proposal(
+            dict(proposal, signature=proposal["signature"].upper()),
+            self.validators, self.chain_id
+        ))
         self.assertFalse(verify_proposal(proposal, self.validators, "other-chain"))
 
     def test_votes_are_domain_separated_and_signed(self):
@@ -69,6 +77,10 @@ class BFTPrimitiveTests(unittest.TestCase):
         )
         self.assertTrue(verify_vote(vote, self.validators, self.chain_id))
         self.assertFalse(verify_vote(dict(vote, step="prevote"), self.validators, self.chain_id))
+        self.assertFalse(verify_vote(
+            dict(vote, block_hash=vote["block_hash"].upper()),
+            self.validators, self.chain_id
+        ))
 
     def test_commit_requires_strictly_more_than_two_thirds_power(self):
         votes = [
