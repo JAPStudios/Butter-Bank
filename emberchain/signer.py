@@ -30,7 +30,7 @@ class ConsensusSigner:
                     or self.state.get("public_key") != self.public_key):
                 raise ValueError("persisted state belongs to another validator or chain")
             height = self.state.get("height")
-            if not isinstance(height, int) or isinstance(height, bool) or height < initial_height:
+            if not isinstance(height, int) or isinstance(height, bool) or height < 1:
                 raise ValueError("invalid persisted consensus height")
             if not isinstance(self.state.get("signed"), dict):
                 raise ValueError("invalid persisted signing history")
@@ -116,6 +116,37 @@ class ConsensusSigner:
         self.state["signed"][slot] = {"block_hash": block_hash, "vote": vote}
         self._save()
         return vote
+
+    def catch_up(self, finalized_blocks):
+        """Advance over committed blocks, preserving evidence of conflicting local votes."""
+        for block in finalized_blocks:
+            height = self.height
+            if not isinstance(block, dict) or block.get("height") != height:
+                raise ValueError("finalized blocks are not contiguous from signer height")
+            block_hash = block.get("hash")
+            round_number = block.get("commit_round")
+            votes = block.get("commit_certificate")
+            records = [
+                {"public_key": key, "voting_power": power}
+                for key, power in self.validators.items()
+            ]
+            if not verify_commit_certificate(
+                votes, records, self.chain_id, height, round_number, block_hash
+            ):
+                raise ValueError("cannot catch up over an invalid commit certificate")
+            if self.state.get("lock") not in (None, block_hash):
+                raise ValueError("finalized history conflicts with the persisted lock")
+            for slot, entry in self.state["signed"].items():
+                try:
+                    signed_height = int(slot.split(":", 1)[0])
+                except (ValueError, AttributeError):
+                    raise ValueError("invalid persisted signing slot")
+                if signed_height == height and entry.get("block_hash") != block_hash:
+                    raise ValueError("finalized history conflicts with a locally signed vote")
+            self.state["height"] = height + 1
+            self.state["lock"] = None
+            self.state["locked_round"] = None
+            self._save()
 
     def finalize(self, votes, round_number, block_hash):
         records = [{"public_key": k, "voting_power": v} for k, v in self.validators.items()]
