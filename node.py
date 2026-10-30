@@ -131,7 +131,8 @@ class Chain:
             self.blocks=candidate; included={sha(canon(t)) for t in b['transactions'][1:]}; self.pool=[t for t in self.pool if sha(canon(t)) not in included]; self.save(); return True,'accepted'
     def _revalidate_pool(self):
         bal,nonces=self.state(); accepted=[]
-        for tx in sorted(self.pool,key=lambda x:(str(x.get('sender','')),x.get('nonce',0) if isinstance(x.get('nonce'),int) else 0)):
+        candidates=[tx for tx in self.pool if isinstance(tx,dict)]
+        for tx in sorted(candidates,key=lambda x:(str(x.get('sender','')),x.get('nonce',0) if isinstance(x.get('nonce'),int) and not isinstance(x.get('nonce'),bool) else 0)):
             ok,_=self.check_tx(tx,bal,nonces)
             if not ok: continue
             s,r=tx['sender'],tx['recipient']; bal[s]-=tx['amount']+tx['fee']; bal[r]=bal.get(r,0)+tx['amount']; nonces[s]=tx['nonce']; nonces.setdefault(r,0); accepted.append(tx)
