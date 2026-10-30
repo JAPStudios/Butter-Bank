@@ -149,7 +149,7 @@ class MainActivity : Activity() {
         })
 
         page.addView(label(
-            "Prototype limitation: these are manually entered personal records, not verified bank transactions or available funds. Data remains in this app's private local storage.",
+            "Prototype limitation: these are manually entered personal records, not verified bank transactions or available funds. Data remains in this app's local storage and is not encrypted by this prototype.",
             12,
             0xFF5B685F.toInt()
         ).apply { setPadding(dp(3), dp(16), dp(3), 0) })
