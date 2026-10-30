@@ -55,6 +55,10 @@ The wallet file contains an unencrypted private key. Keep it private, back it up
 
 Do not use this prototype for real funds or expose its node API to the public internet. It still lacks production consensus, reliable chain synchronization and reorganizations, peer authentication, rate limiting, hardened key storage, and independent security review.
 
+## Continuous integration
+
+GitHub Actions runs the Python node and wallet test suite and builds the Android debug APK while running the Android unit tests for pull requests and pushes to `main`.
+
 ## Security and scope
 
 No component in this repository should be represented as a licensed bank, deposit-taking institution, production wallet, or audited payment network. Real banking and payment functionality requires defined product requirements, regulated-provider integrations where applicable, security engineering, and legal/compliance review.
