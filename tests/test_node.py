@@ -147,6 +147,37 @@ class ChainValidationTests(unittest.TestCase):
 
 
 
+    def test_reorganization_returns_orphaned_transactions_to_mempool(self):
+        sender_key, _, sender = wallet()
+        _, _, recipient = wallet()
+        self.cfg["genesis_allocations"] = {sender: 1000}
+        self.path = Path(self.temp.name) / "reorg-local.json"
+        self.chain = Chain(self.cfg, self.path)
+        tx = {
+            "chain_id": self.cfg["chain_id"],
+            "sender": sender,
+            "recipient": recipient,
+            "amount": 125,
+            "fee": 3,
+            "nonce": 1,
+        }
+        tx["signature"] = sender_key.sign(signing_bytes(tx)).hex()
+        self.assertTrue(self.chain.add_tx(tx)[0])
+        local_block, message = self.chain.mine(sender)
+        self.assertEqual(message, "mined")
+        self.assertIn(tx, local_block["transactions"])
+
+        remote = Chain(self.cfg, Path(self.temp.name) / "reorg-remote.json")
+        _, _, remote_miner = wallet()
+        remote.mine(remote_miner)
+        remote.mine(remote_miner)
+        self.assertTrue(self.chain.replace(remote.blocks)[0])
+        self.assertEqual(self.chain.blocks, remote.blocks)
+        self.assertIn(tx, self.chain.pool)
+        balances, nonces = self.chain.state()
+        self.assertEqual(balances[sender], 1000)
+        self.assertEqual(nonces[sender], 0)
+
     def test_peer_sync_fetches_and_adopts_longer_chain(self):
         _, _, miner = wallet()
         remote = Chain(self.cfg, Path(self.temp.name) / "remote-periodic.json")
