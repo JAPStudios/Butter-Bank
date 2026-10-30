@@ -147,6 +147,15 @@ class ChainValidationTests(unittest.TestCase):
 
 
 
+    def test_chain_work_uses_proof_of_work_target(self):
+        from node import block_work, chain_work
+
+        self.assertEqual(block_work(1), 16)
+        self.assertEqual(block_work(2), 256)
+        _, _, miner = wallet()
+        self.chain.mine(miner)
+        self.assertEqual(chain_work(self.chain.blocks, self.chain.diff), 16)
+
     def test_reorganization_returns_orphaned_transactions_to_mempool(self):
         sender_key, _, sender = wallet()
         _, _, recipient = wallet()
