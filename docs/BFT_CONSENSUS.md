@@ -22,9 +22,13 @@ A public network cannot be both permissionless and Sybil-resistant merely by rem
 
 The admission module is a mechanism, not a preselected list of real-world issuers. Before mainnet, publish issuer selection criteria, independence requirements, renewal and appeal procedures, revocation rules, privacy safeguards, and a public audit process.
 
-## Not yet integrated with the existing node
+## Node integration and remaining production blockers
 
-The existing node.py chain remains proof-of-work. The BFT modules in this branch are separate components and do not yet replace proof-of-work block acceptance, persistence, peer synchronization, or transaction finalization. Do not advertise the current repository as a running BFT network until that integration and its end-to-end tests are complete.
+The original node.py entry point remains proof-of-work for backward compatibility. The separate bft_node.py entry point uses BFTChain for certificate-validated block acceptance, persistent account state, transaction/mempool rules, peer synchronization, and a /propose API. BFTChain refuses proof-of-work mining and rejects blocks without a valid commit certificate. The test suite includes a four-node local network finality test and tests for conflicting longer forks.
+
+This is an integrated development prototype, not a production-ready consensus protocol. The coordinator deliberately refuses round advancement after a lock because safe Tendermint-style valid-round/unlock rules have not yet been implemented. It has no distributed round-change/timeout protocol, so a stalled proposer or incomplete commit can stall the chain. Validator-set changes and revocation activation at committed heights are not implemented; the active issuer and validator sets are fixed by node configuration. Signer state is protected against accidental modification and ordinary double-signing, but local disk rollback cannot be cryptographically prevented without a trusted monotonic store or equivalent operational control. Offline validators can catch up only from a valid committed chain and will refuse catch-up if their local lock or precommit conflicts.
+
+The four-node test is a deterministic integration test, not a substitute for formal protocol review, independent security audit, network-partition testing, Byzantine fault injection, load testing, or a production incident/recovery exercise. Do not deploy with real funds or describe the system as production-secure until those workstreams and the issuer federation's governance decisions are complete.
 
 
 ## Running a development validator
