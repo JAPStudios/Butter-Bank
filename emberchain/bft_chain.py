@@ -1,5 +1,6 @@
 """BFT-finalized account chain reusing the existing Biscuits transaction rules."""
-from node import Chain, bhash, canon, sha
+import time
+from node import Chain, bhash, canon, sha, MAX_TXS
 from consensus import verify_commit_certificate, validator_set_hash
 from admission import validator_set_from_certificates
 
@@ -86,7 +87,7 @@ class BFTChain(Chain):
             balances, nonces = self.state()
             chosen, fees = [], 0
             for tx in sorted(self.pool, key=lambda item: (item["sender"], item["nonce"])):
-                if len(chosen) >= 100:
+                if len(chosen) >= MAX_TXS:
                     break
                 ok, _ = self.check_tx(tx, balances, nonces)
                 if not ok:
@@ -101,7 +102,7 @@ class BFTChain(Chain):
             block = {
                 "height": len(self.blocks),
                 "previous_hash": self.blocks[-1]["hash"],
-                "timestamp": max(int(__import__("time").time()), self.blocks[-1]["timestamp"]),
+                "timestamp": max(int(time.time()), self.blocks[-1]["timestamp"]),
                 "transactions": [{"type": "coinbase", "recipient": proposer,
                                  "amount": self.reward + fees}] + chosen,
                 "nonce": 0,
