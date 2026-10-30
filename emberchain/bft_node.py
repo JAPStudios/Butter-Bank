@@ -99,8 +99,6 @@ def main():
         signer.catch_up(chain.blocks[signer.height:])
     if signer.height != len(chain.blocks):
         raise SystemExit("Validator signer height does not match finalized chain height; refusing to sign.")
-    engine = ConsensusEngine(signer, chain.validate_proposal_block)
-
     def persist_finalized(result):
         ok, message = chain.accept_finalized_block(
             result["block"], result["round"], result["commit_votes"]
@@ -108,10 +106,12 @@ def main():
         if not ok:
             raise RuntimeError(message)
 
+    engine = ConsensusEngine(
+        signer, chain.validate_proposal_block, on_finalized=persist_finalized
+    )
     consensus_server = ConsensusHTTPServer(
         engine,
         peers=cfg.get("consensus_peers", []),
-        on_finalized=persist_finalized,
         host=cfg.get("consensus_host", "127.0.0.1"),
         port=int(cfg.get("consensus_port", 8334)),
         tls_certfile=cfg.get("consensus_tls_certfile"),
