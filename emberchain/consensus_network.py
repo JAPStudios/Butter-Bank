@@ -246,7 +246,8 @@ class ConsensusHTTPServer:
         envelope = {"round_change": message}
         if self._remember("round-change", envelope):
             self.engine.receive_round_change(message)
-            self._broadcast("/consensus/round-change", envelope)
+        # Re-broadcast idempotently so a lost first delivery can be recovered.
+        self._broadcast("/consensus/round-change", envelope)
         return message
 
     def publish_vote(self, vote):
