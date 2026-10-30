@@ -17,6 +17,8 @@ from consensus import make_vote, normalize_validator_set, validator_set_hash, ve
 def _synchronized(method):
     def wrapper(self, *args, **kwargs):
         with self._lock:
+            if getattr(self, "_closed", False):
+                raise RuntimeError("validator signer is closed")
             return method(self, *args, **kwargs)
     return wrapper
 
@@ -60,6 +62,7 @@ class ConsensusSigner:
             os.close(self._lock_fd)
             self._lock_fd = None
             raise RuntimeError("validator state is already in use by another process")
+        self._closed = False
         if self.path.exists():
             state_flags = os.O_RDONLY
             if hasattr(os, "O_NOFOLLOW"):
@@ -142,6 +145,7 @@ class ConsensusSigner:
         """Release the exclusive process lock when this validator stops."""
         lock = getattr(self, "_lock", None)
         if lock is None:
+            self._closed = True
             return
         with lock:
             if getattr(self, "_lock_fd", None) is not None:
@@ -152,6 +156,7 @@ class ConsensusSigner:
                     msvcrt.locking(self._lock_fd, msvcrt.LK_UNLCK, 1)
                 os.close(self._lock_fd)
                 self._lock_fd = None
+            self._closed = True
 
     def __del__(self):
         try:
