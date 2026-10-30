@@ -47,6 +47,7 @@ def normalize_validator_set(validators: Sequence[Mapping[str, object]]) -> dict[
         power = item["voting_power"]
         if not _is_hex(key, 32):
             raise ValueError("validator public_key must be 32-byte hex")
+        key = key.lower()
         if not isinstance(power, int) or isinstance(power, bool) or power <= 0:
             raise ValueError("validator voting_power must be a positive integer")
         if key in result:
