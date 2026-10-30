@@ -285,6 +285,19 @@ class BFTPrimitiveTests(unittest.TestCase):
             self.assertEqual(observed_heights, [1])
             self.assertEqual(signer.height, 2)
 
+    def test_round_number_survives_restart_and_prevents_regression(self):
+        key, _ = self.keys_and_records[0]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            signer = ConsensusSigner(key, self.chain_id, self.validators, path)
+            self.assertEqual(signer.advance_round(), 1)
+            reopened = ConsensusSigner(key, self.chain_id, self.validators, path)
+            engine = ConsensusEngine(reopened, lambda block: block.get("hash"))
+            self.assertEqual(engine.round, 1)
+            with self.assertRaises(ValueError):
+                reopened.sign_vote(0, "prevote", self.block_hash)
+            reopened.sign_vote(1, "prevote", self.block_hash)
+
 
 if __name__ == "__main__":
     unittest.main()
