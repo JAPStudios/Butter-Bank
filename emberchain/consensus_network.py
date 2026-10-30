@@ -6,6 +6,7 @@ signatures; transport encryption and peer admission remain deployment concerns.
 import hashlib
 from collections import deque
 import json
+import ssl
 import threading
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -16,7 +17,7 @@ from engine import ConsensusEngine
 
 
 class ConsensusHTTPServer:
-    def __init__(self, engine, peers=(), on_finalized=None, host="127.0.0.1", port=8334):
+    def __init__(self, engine, peers=(), on_finalized=None, host="127.0.0.1", port=8334, tls_certfile=None, tls_keyfile=None):
         if not isinstance(engine, ConsensusEngine):
             raise TypeError("engine must be a ConsensusEngine")
         self.engine = engine
@@ -119,6 +120,17 @@ class ConsensusHTTPServer:
                     self.send_json(500, {"ok": False, "error": "internal consensus transport error"})
 
         self.server = ThreadingHTTPServer((host, port), Handler)
+        if host not in ("127.0.0.1", "localhost", "::1") and not (tls_certfile and tls_keyfile):
+            self.server.server_close()
+            raise ValueError("non-loopback consensus listeners require a TLS certificate and private key")
+        if bool(tls_certfile) != bool(tls_keyfile):
+            self.server.server_close()
+            raise ValueError("both TLS certificate and private key are required")
+        if tls_certfile:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
+            context.load_cert_chain(tls_certfile, tls_keyfile)
+            self.server.socket = context.wrap_socket(self.server.socket, server_side=True)
 
     def publish_proposal(self, proposal, block):
         """Validate a locally-created proposal and relay it to configured peers."""
