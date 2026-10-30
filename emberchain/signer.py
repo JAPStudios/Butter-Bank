@@ -52,7 +52,7 @@ class ConsensusSigner:
                 fcntl.flock(self._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             else:
                 if os.fstat(self._lock_fd).st_size == 0:
-                    os.write(self._lock_fd, b"\\0")
+                    os.write(self._lock_fd, b"\0")
                 os.lseek(self._lock_fd, 0, os.SEEK_SET)
                 msvcrt.locking(self._lock_fd, msvcrt.LK_NBLCK, 1)
         except OSError:
