@@ -8,6 +8,8 @@ import android.os.Bundle
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
@@ -64,6 +66,23 @@ class MainActivity : Activity() {
             setPadding(dp(20), dp(24), dp(20), dp(32))
         }
         scroll.addView(page)
+        val originalLeft = dp(20)
+        val originalTop = dp(24)
+        val originalRight = dp(20)
+        val originalBottom = dp(32)
+        ViewCompat.setOnApplyWindowInsetsListener(scroll) { _, insets ->
+            val systemBars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            )
+            page.setPadding(
+                originalLeft + systemBars.left,
+                originalTop + systemBars.top,
+                originalRight + systemBars.right,
+                originalBottom + systemBars.bottom
+            )
+            insets
+        }
+        ViewCompat.requestApplyInsets(scroll)
 
         page.addView(label("BUTTER BANK", 28, 0xFF244B35.toInt(), true))
         page.addView(label("Your money, organized.", 17, 0xFF26352B.toInt(), true).apply {
@@ -172,17 +191,25 @@ class MainActivity : Activity() {
         }
 
         val type = if (typeSpinner.selectedItemPosition == 1) EntryType.INCOME else EntryType.EXPENSE
-        entries.add(
-            0,
-            LedgerEntry(
-                id = UUID.randomUUID().toString(),
-                description = description,
-                amountCents = amount,
-                type = type,
-                category = category,
-                timestampMillis = System.currentTimeMillis()
-            )
+        val newEntry = LedgerEntry(
+            id = UUID.randomUUID().toString(),
+            description = description,
+            amountCents = amount,
+            type = type,
+            category = category,
+            timestampMillis = System.currentTimeMillis()
         )
+        val candidateEntries = entries.toMutableList().apply { add(0, newEntry) }
+        try {
+            // Validate every dashboard aggregate before persisting the new record.
+            LedgerMath.totalCents(candidateEntries, EntryType.INCOME)
+            LedgerMath.totalCents(candidateEntries, EntryType.EXPENSE)
+            LedgerMath.balanceCents(candidateEntries)
+        } catch (_: ArithmeticException) {
+            toast("This record would exceed the supported ledger total.")
+            return
+        }
+        entries.add(0, newEntry)
         saveLocalData()
         titleInput.text.clear()
         amountInput.text.clear()
@@ -192,8 +219,8 @@ class MainActivity : Activity() {
     }
 
     private fun renderDashboard() {
-        val income = entries.filter { it.type == EntryType.INCOME }.sumOf { it.amountCents }
-        val expenses = entries.filter { it.type == EntryType.EXPENSE }.sumOf { it.amountCents }
+        val income = LedgerMath.totalCents(entries, EntryType.INCOME)
+        val expenses = LedgerMath.totalCents(entries, EntryType.EXPENSE)
         val balance = LedgerMath.balanceCents(entries)
 
         balanceValue.text = Money.formatCents(balance)
@@ -265,7 +292,7 @@ class MainActivity : Activity() {
             if (entry.type != EntryType.EXPENSE) return@filter false
             val date = Calendar.getInstance().apply { timeInMillis = entry.timestampMillis }
             date.get(Calendar.YEAR) == year && date.get(Calendar.MONTH) == month
-        }.sumOf { it.amountCents }
+        }.fold(0L) { total, entry -> Math.addExact(total, entry.amountCents) }
     }
 
     private fun loadLocalData() {
