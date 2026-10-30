@@ -337,6 +337,22 @@ class BFTPrimitiveTests(unittest.TestCase):
                 self.assertIn(("0", "prevote"), {
                     (str(key[0]), key[1]) for key in engine.votes
                 })
+            finally:
+                server.shutdown()
+                thread.join(timeout=2)
+
+    def test_http_transport_round_change_requires_quorum(self):
+        with tempfile.TemporaryDirectory() as directory:
+            signer = ConsensusSigner(
+                self.keys_and_records[0][0], self.chain_id, self.validators,
+                Path(directory) / "round-change-network-state.json"
+            )
+            engine = ConsensusEngine(signer, lambda block: block.get("hash"))
+            server = ConsensusHTTPServer(engine, host="127.0.0.1", port=0)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            url = "http://127.0.0.1:" + str(server.server.server_address[1])
+            try:
                 server.publish_round_change(1)
                 for key, _ in self.keys_and_records[1:3]:
                     round_change = make_round_change(
