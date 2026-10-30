@@ -89,6 +89,42 @@ def bft_peer_sync_loop(chain, engine, interval=10):
         time.sleep(interval)
 
 
+
+def bft_round_timeout_loop(consensus_server, initial_timeout=10.0,
+                           maximum_timeout=120.0, stop_event=None):
+    """Request certified round changes after inactivity, with bounded backoff.
+
+    Validators that have signed a vote or acquired a lock refuse to change
+    rounds. The loop therefore cannot bypass signer anti-equivocation rules.
+    """
+    if (not isinstance(initial_timeout, (int, float))
+            or isinstance(initial_timeout, bool) or initial_timeout <= 0
+            or not isinstance(maximum_timeout, (int, float))
+            or isinstance(maximum_timeout, bool) or maximum_timeout < initial_timeout):
+        raise ValueError("invalid BFT round timeout configuration")
+    stop_event = stop_event or threading.Event()
+    timeout = float(initial_timeout)
+    observed = (consensus_server.engine.height, consensus_server.engine.round)
+    while not stop_event.wait(timeout):
+        engine = consensus_server.engine
+        current = (engine.height, engine.round)
+        if current != observed:
+            observed = current
+            timeout = float(initial_timeout)
+            continue
+        pending = [
+            int(target) for target in engine.signer.state.get("signed_round_changes", {})
+            if int(target) > engine.round
+        ]
+        target_round = min(pending) if pending else engine.round + 1
+        try:
+            consensus_server.publish_round_change(target_round)
+        except (RuntimeError, ValueError):
+            # A prior vote or lock intentionally prevents an unsafe timeout vote.
+            pass
+        timeout = min(timeout * 2, float(maximum_timeout))
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="config.json")
@@ -138,6 +174,17 @@ def main():
     BFTAPI.consensus_key = key
 
     threading.Thread(target=consensus_server.serve_forever, daemon=True).start()
+    timeout_stop = threading.Event()
+    threading.Thread(
+        target=bft_round_timeout_loop,
+        args=(
+            consensus_server,
+            float(cfg.get("round_timeout_seconds", 10)),
+            float(cfg.get("round_timeout_max_seconds", 120)),
+            timeout_stop,
+        ),
+        daemon=True,
+    ).start()
     threading.Thread(target=bft_peer_sync_loop, args=(chain, engine), daemon=True).start()
     http_server = ThreadingHTTPServer(
         (api_host, int(cfg.get("port", 8333))), BFTAPI
@@ -151,6 +198,7 @@ def main():
         pass
     finally:
         http_server.server_close()
+        timeout_stop.set()
         consensus_server.shutdown()
         signer.close()
 
