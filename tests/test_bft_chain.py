@@ -1,6 +1,9 @@
 import tempfile
 import unittest
 import threading
+import json
+import urllib.request
+from http.server import ThreadingHTTPServer
 import time
 from pathlib import Path
 
@@ -12,7 +15,7 @@ from consensus import make_proposal, select_proposer
 from consensus_network import ConsensusHTTPServer
 from engine import ConsensusEngine
 from signer import ConsensusSigner
-from bft_node import load_validator_key
+from bft_node import BFTAPI, load_validator_key
 from keygen import generate_keypair
 from consensus import make_vote, validator_set_hash
 
@@ -270,6 +273,45 @@ class BFTChainTests(unittest.TestCase):
             cfg = dict(self.cfg, peers=["http://example.com:8333"])
             with self.assertRaises(ValueError):
                 BFTChain(cfg, Path(directory) / "chain.json")
+
+    def test_bft_node_propose_api_only_allows_selected_proposer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            chain = BFTChain(self.cfg, Path(directory) / "chain.json")
+            selected = select_proposer(chain.validators, 1, 0)
+            selected_key = next(
+                key for key in self.validator_keys
+                if key.public_key().public_bytes_raw().hex() == selected
+            )
+            signer = ConsensusSigner(
+                selected_key, self.chain_id, chain.validators,
+                Path(directory) / "signer.json"
+            )
+            engine = ConsensusEngine(signer, chain.validate_proposal_block)
+            consensus_server = ConsensusHTTPServer(engine, host="127.0.0.1", port=0)
+            BFTAPI.chain = chain
+            BFTAPI.peers = chain.peers
+            BFTAPI.consensus_server = consensus_server
+            BFTAPI.consensus_key = selected_key
+            api_server = ThreadingHTTPServer(("127.0.0.1", 0), BFTAPI)
+            thread = threading.Thread(target=api_server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                url = "http://127.0.0.1:" + str(api_server.server_address[1]) + "/propose"
+                request = urllib.request.Request(
+                    url, data=json.dumps({}).encode(),
+                    headers={"Content-Type": "application/json"}, method="POST"
+                )
+                with urllib.request.urlopen(request, timeout=2) as response:
+                    result = json.loads(response.read())
+                    self.assertEqual(response.status, 200)
+                self.assertTrue(result["ok"])
+                self.assertEqual(result["proposal"]["proposer"], selected)
+                self.assertIn("1:0:prevote", signer.state["signed"])
+            finally:
+                api_server.shutdown()
+                api_server.server_close()
+                thread.join(timeout=2)
+                consensus_server.server.server_close()
 
 
 if __name__ == "__main__":
