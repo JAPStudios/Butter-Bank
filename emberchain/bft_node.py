@@ -141,6 +141,7 @@ def main():
     finally:
         http_server.server_close()
         consensus_server.shutdown()
+        signer.close()
 
 
 if __name__ == "__main__":
