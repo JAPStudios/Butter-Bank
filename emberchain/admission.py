@@ -22,6 +22,7 @@ def normalize_issuers(issuers):
         key = item.get("public_key") if isinstance(item, Mapping) else item
         if not _is_hex(key, 32):
             raise ValueError("issuer keys must be 32-byte hex")
+        key = key.lower()
         if key in keys:
             raise ValueError("duplicate issuer key")
         keys.append(key)
@@ -87,6 +88,9 @@ def verify_admission_certificate(certificate, issuers, chain_id, current_epoch):
             if not isinstance(item, Mapping) or set(item) != {"issuer", "signature"}:
                 return False
             issuer, signature = item["issuer"], item["signature"]
+            if not isinstance(issuer, str):
+                return False
+            issuer = issuer.lower()
             if issuer not in normalized or issuer in seen or not _is_hex(signature, 64):
                 return False
             Ed25519PublicKey.from_public_bytes(bytes.fromhex(issuer)).verify(
@@ -108,7 +112,7 @@ def validator_set_from_certificates(certificates, issuers, chain_id, current_epo
     for certificate in certificates:
         if not verify_admission_certificate(certificate, issuers, chain_id, current_epoch):
             raise ValueError("invalid or expired validator admission certificate")
-        key = certificate["validator_public_key"]
+        key = certificate["validator_public_key"].lower()
         if key in seen:
             raise ValueError("duplicate admitted validator")
         seen.add(key)
