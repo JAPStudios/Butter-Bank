@@ -31,9 +31,18 @@ Python 3.10+:
 ```sh
 python -m venv .venv
 . .venv/bin/activate
-pip install -r requirements.txt
-python -m unittest discover -s tests -v
+python -m pip install -r emberchain/requirements.txt
+PYTHONPATH=emberchain python -m unittest discover -s tests -v
 ```
+
+Create and inspect a local development wallet:
+
+```sh
+python emberchain/wallet.py create my-wallet.json
+python emberchain/wallet.py address my-wallet.json
+```
+
+The wallet file contains an unencrypted private key. Keep it private, back it up securely, and never commit it. The repository's `.gitignore` excludes wallet files matching `*-wallet.json`; use that suffix for generated keys.
 
 Do not use this prototype for real funds or expose its node API to the public internet. It still lacks production consensus, reliable chain synchronization and reorganizations, peer authentication, rate limiting, hardened key storage, and independent security review.
 
