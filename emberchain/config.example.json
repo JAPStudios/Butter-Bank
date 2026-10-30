@@ -1,6 +1,6 @@
 {
-  "chain_id": "emberchain-devnet-1",
-  "symbol": "EMBER",
+  "chain_id": "milkchain-devnet-1",
+  "symbol": "BISCUITS",
   "decimals": 8,
   "difficulty": 3,
   "block_reward": 5000000000,
