@@ -78,6 +78,12 @@ class ConsensusHTTPServer:
                         digest = outer._remember("proposal", message)
                         if digest:
                             outer._broadcast("/consensus/proposal", message)
+                        # Every validator independently prevotes a validated proposal.
+                        try:
+                            outer.publish_vote(outer.engine.prevote(proposal["block_hash"]))
+                        except ValueError:
+                            # A persisted lock may correctly prevent this vote.
+                            pass
                         self.send_json(200, {"ok": True})
                         return
                     if path == "/consensus/vote":
@@ -121,6 +127,10 @@ class ConsensusHTTPServer:
         message = {"proposal": proposal, "block": block}
         if self._remember("proposal", message):
             self._broadcast("/consensus/proposal", message)
+        try:
+            self.publish_vote(self.engine.prevote(proposal["block_hash"]))
+        except ValueError:
+            pass
         return True
 
     def publish_vote(self, vote):
