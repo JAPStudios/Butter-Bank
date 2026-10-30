@@ -11,7 +11,7 @@ import tempfile
 import threading
 from pathlib import Path
 
-from consensus import (make_vote, make_round_change, normalize_validator_set, validator_set_hash, verify_vote, verify_round_change, verify_round_change_certificate, verify_commit_certificate, _is_hex)
+from consensus import (make_vote, make_round_change, normalize_validator_set, validator_set_hash, verify_vote, verify_round_change, verify_round_change_certificate, verify_commit_certificate, _is_hex, MAX_ROUND)
 
 
 def _synchronized(method):
@@ -107,7 +107,7 @@ class ConsensusSigner:
             if "round" not in self.state:
                 self.state["round"] = 0
             if (not isinstance(self.state["round"], int) or isinstance(self.state["round"], bool)
-                    or self.state["round"] < 0):
+                    or self.state["round"] < 0 or self.state["round"] > MAX_ROUND):
                 raise ValueError("invalid persisted consensus round")
             lock = self.state.get("lock")
             if lock is not None and not _is_hex(lock, 32):
@@ -117,7 +117,7 @@ class ConsensusSigner:
                 raise ValueError("persisted lock round exists without a lock")
             if lock is not None and (
                 not isinstance(locked_round, int) or isinstance(locked_round, bool)
-                or locked_round < 0 or locked_round > self.state["round"]
+                or locked_round < 0 or locked_round > MAX_ROUND\n                or locked_round > self.state["round"]
             ):
                 raise ValueError("invalid persisted lock round")
             for slot, entry in self.state["signed"].items():
@@ -212,7 +212,7 @@ class ConsensusSigner:
     def sign_round_change(self, target_round):
         """Persist a signed request for a later round; locked validators refuse."""
         if (not isinstance(target_round, int) or isinstance(target_round, bool)
-                or target_round <= self.current_round):
+                or target_round <= self.current_round or target_round > MAX_ROUND):
             raise ValueError("target_round must be greater than the current round")
         if self.state["lock"] is not None:
             raise RuntimeError("locked validator cannot request an unlocked round change")
