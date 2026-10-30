@@ -387,6 +387,54 @@ class BFTChainTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "non-symlink"):
                 load_validator_key(link)
 
+    def test_two_of_four_partition_cannot_finalize(self):
+        with tempfile.TemporaryDirectory() as directory:
+            proposer = select_proposer(
+                [{"public_key": key.public_key().public_bytes_raw().hex(),
+                  "voting_power": 1} for key in self.validator_keys],
+                1, 0
+            )
+            proposer_index = next(
+                i for i, key in enumerate(self.validator_keys)
+                if key.public_key().public_bytes_raw().hex() == proposer
+            )
+            active_indices = [proposer_index, (proposer_index + 1) % 4]
+            chains, servers, threads = [], [], []
+            for index in active_indices:
+                chain = BFTChain(self.cfg, Path(directory) / f"partition-chain-{index}.json")
+                signer = ConsensusSigner(
+                    self.validator_keys[index], self.chain_id, chain.validators,
+                    Path(directory) / f"partition-signer-{index}.json"
+                )
+                engine = ConsensusEngine(signer, chain.validate_proposal_block)
+                server = ConsensusHTTPServer(engine, host="127.0.0.1", port=0)
+                chains.append(chain)
+                servers.append(server)
+            urls = [
+                "http://127.0.0.1:" + str(server.server.server_address[1])
+                for server in servers
+            ]
+            for index, server in enumerate(servers):
+                server.peers = [url for peer_index, url in enumerate(urls)
+                                if peer_index != index]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                threads.append(thread)
+            try:
+                block = chains[0].build_proposal(proposer)
+                proposal = make_proposal(
+                    self.validator_keys[proposer_index], self.chain_id, 1, 0,
+                    block["hash"], validator_set_hash(chains[0].validators)
+                )
+                servers[0].publish_proposal(proposal, block)
+                time.sleep(0.5)
+                self.assertTrue(all(len(chain.blocks) == 1 for chain in chains))
+            finally:
+                for server in servers:
+                    server.shutdown()
+                for thread in threads:
+                    thread.join(timeout=2)
+
 
 if __name__ == "__main__":
     unittest.main()
