@@ -407,7 +407,17 @@ class BFTChainTests(unittest.TestCase):
                     Path(directory) / f"partition-signer-{index}.json"
                 )
                 engine = ConsensusEngine(signer, chain.validate_proposal_block)
-                server = ConsensusHTTPServer(engine, host="127.0.0.1", port=0)
+
+                def persist(result, target=chain):
+                    ok, message = target.accept_finalized_block(
+                        result["block"], result["round"], result["commit_votes"]
+                    )
+                    if not ok:
+                        raise RuntimeError(message)
+
+                server = ConsensusHTTPServer(
+                    engine, host="127.0.0.1", port=0, on_finalized=persist
+                )
                 chains.append(chain)
                 servers.append(server)
             urls = [
