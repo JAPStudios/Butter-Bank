@@ -241,7 +241,11 @@ class BFTPrimitiveTests(unittest.TestCase):
             proposal = make_proposal(proposer_key, self.chain_id, 1, 0,
                                      self.block_hash, self.set_hash)
             self.assertFalse(engine.receive_proposal(proposal, {"hash": "cd" * 32}))
-            self.assertEqual(engine.advance_round(), 1)
+            certificate = [
+                make_round_change(key, self.chain_id, 1, 1, self.set_hash)
+                for key, _ in self.keys_and_records[:3]
+            ]
+            self.assertEqual(engine.advance_round(certificate), 1)
             locked_prevotes = [
                 make_vote(key, self.chain_id, 1, 1, "prevote",
                           self.block_hash, self.set_hash)
@@ -358,7 +362,11 @@ class BFTPrimitiveTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "state.json"
             signer = ConsensusSigner(key, self.chain_id, self.validators, path)
-            self.assertEqual(signer.advance_round(), 1)
+            certificate = [
+                make_round_change(key, self.chain_id, 1, 1, self.set_hash)
+                for key, _ in self.keys_and_records[:3]
+            ]
+            self.assertEqual(signer.advance_round(certificate), 1)
             signer.close()
             reopened = ConsensusSigner(key, self.chain_id, self.validators, path)
             engine = ConsensusEngine(reopened, lambda block: block.get("hash"))
