@@ -1,3 +1,4 @@
+import os
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 import json
@@ -427,6 +428,7 @@ class BFTPrimitiveTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 ConsensusHTTPServer(engine, host="0.0.0.0", port=0)
 
+    @unittest.skipIf(os.name == "nt", "POSIX file-mode and symlink semantics")
     def test_signer_rejects_group_readable_state_file(self):
         key, _ = self.keys_and_records[0]
         with tempfile.TemporaryDirectory() as directory:
@@ -437,6 +439,7 @@ class BFTPrimitiveTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "permissions 0600"):
                 ConsensusSigner(key, self.chain_id, self.validators, path)
 
+    @unittest.skipIf(os.name == "nt", "POSIX file-mode and symlink semantics")
     def test_signer_rejects_state_file_symlink(self):
         key, _ = self.keys_and_records[0]
         with tempfile.TemporaryDirectory() as directory:
