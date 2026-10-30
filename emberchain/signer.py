@@ -372,4 +372,5 @@ class ConsensusSigner:
         self.state["round"] = 0
         self.state["lock"] = None
         self.state["locked_round"] = None
+        self.state["signed_round_changes"] = {}
         self._save()
