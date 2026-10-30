@@ -24,6 +24,7 @@ from consensus import (
 from signer import ConsensusSigner
 from engine import ConsensusEngine
 from consensus_network import ConsensusHTTPServer
+from bft_node import bft_round_timeout_loop
 
 
 def validator(power=1):
@@ -651,3 +652,59 @@ class BFTPrimitiveTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BFTRoundTimeoutLoopTests(unittest.TestCase):
+    class StopAfter:
+        def __init__(self, count):
+            self.count = count
+            self.calls = []
+
+        def wait(self, timeout):
+            self.calls.append(timeout)
+            return len(self.calls) >= self.count
+
+    class FakeSigner:
+        pending_round_change_targets = (4, 7)
+
+    class FakeEngine:
+        height = 3
+        round = 1
+        signer = FakeSigner()
+
+    class FakeServer:
+        def __init__(self):
+            self.engine = BFTRoundTimeoutLoopTests.FakeEngine()
+            self.targets = []
+
+        def publish_round_change(self, target):
+            self.targets.append(target)
+
+    def test_timeout_loop_retries_persisted_target_with_bounded_exponential_backoff(self):
+        server = self.FakeServer()
+        stop = self.StopAfter(4)
+
+        bft_round_timeout_loop(
+            server, initial_timeout=2, maximum_timeout=8, stop_event=stop
+        )
+
+        self.assertEqual(stop.calls, [2, 4, 8, 8])
+        self.assertEqual(server.targets, [4, 4, 4])
+
+    def test_timeout_loop_rejects_invalid_timeout_configuration(self):
+        server = self.FakeServer()
+        for initial, maximum in ((0, 8), (-1, 8), (True, 8), (2, 1), (2, False)):
+            with self.subTest(initial=initial, maximum=maximum):
+                with self.assertRaises(ValueError):
+                    bft_round_timeout_loop(
+                        server, initial_timeout=initial,
+                        maximum_timeout=maximum, stop_event=self.StopAfter(1)
+                    )
+
+    def test_timeout_loop_exits_without_publishing_when_already_stopped(self):
+        server = self.FakeServer()
+        stop = self.StopAfter(1)
+
+        bft_round_timeout_loop(server, stop_event=stop)
+
+        self.assertEqual(server.targets, [])
