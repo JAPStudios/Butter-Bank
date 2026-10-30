@@ -1,4 +1,6 @@
 import unittest
+import tempfile
+from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -11,6 +13,7 @@ from consensus import (
     verify_proposal,
     verify_vote,
 )
+from signer import ConsensusSigner
 
 
 def validator(power=1):
@@ -82,6 +85,35 @@ class BFTPrimitiveTests(unittest.TestCase):
         self.assertIn(first, {v["public_key"] for v in self.validators})
         with self.assertRaises(ValueError):
             select_proposer(self.validators, 0, 0)
+
+    def test_signer_persists_votes_and_refuses_double_signing(self):
+        key, _ = self.keys_and_records[0]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'validator-state.json'
+            signer = ConsensusSigner(key, self.chain_id, self.validators, path)
+            vote = signer.sign_vote(0, 'prevote', self.block_hash)
+            reopened = ConsensusSigner(key, self.chain_id, self.validators, path)
+            self.assertEqual(vote, reopened.sign_vote(0, 'prevote', self.block_hash))
+            with self.assertRaises(ValueError):
+                reopened.sign_vote(0, 'prevote', 'cd' * 32)
+
+    def test_signer_requires_prevote_quorum_lock_before_precommit(self):
+        key, _ = self.keys_and_records[0]
+        with tempfile.TemporaryDirectory() as directory:
+            signer = ConsensusSigner(key, self.chain_id, self.validators, Path(directory) / 'state.json')
+            with self.assertRaises(ValueError):
+                signer.sign_vote(0, 'precommit', self.block_hash)
+            prevotes = [make_vote(k, self.chain_id, 1, 0, 'prevote', self.block_hash, self.set_hash) for k, _ in self.keys_and_records[:3]]
+            signer.lock_from_prevotes(prevotes, 0, self.block_hash)
+            self.assertTrue(verify_vote(signer.sign_vote(0, 'precommit', self.block_hash), self.validators, self.chain_id))
+            with self.assertRaises(ValueError):
+                signer.sign_vote(1, 'prevote', 'cd' * 32)
+
+    def test_proposal_rejects_non_designated_validator(self):
+        selected = select_proposer(self.validators, 1, 0)
+        wrong = next(k for k, record in self.keys_and_records if record['public_key'] != selected)
+        proposal = make_proposal(wrong, self.chain_id, 1, 0, self.block_hash, self.set_hash)
+        self.assertFalse(verify_proposal(proposal, self.validators, self.chain_id))
 
 
 if __name__ == "__main__":
