@@ -147,6 +147,12 @@ class ConsensusSigner:
                         or vote.get("step") != parts[2]
                         or vote.get("block_hash") != entry["block_hash"]):
                     raise ValueError("persisted signing record failed signature validation")
+            for target in self.state["signed_round_changes"]:
+                for signed_slot in self.state["signed"]:
+                    parts = signed_slot.split(":")
+                    if (len(parts) == 3 and parts[0] == str(height)
+                            and int(parts[1]) < int(target)):
+                        raise ValueError("persisted vote conflicts with a later round-change request")
                 if (signed_height == height and parts[2] == "precommit"
                         and (lock is None or entry["block_hash"] != lock)):
                     raise ValueError("persisted precommit conflicts with the current lock")
