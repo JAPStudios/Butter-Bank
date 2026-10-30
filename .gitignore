@@ -5,3 +5,5 @@ config.json
 data-*.json
 *-wallet.json
 *.tmp
+
+.fake
