@@ -86,6 +86,18 @@ class ChainValidationTests(unittest.TestCase):
         restored = Chain(self.cfg, self.path)
         self.assertEqual(restored.pool, [tx])
 
+    def test_configured_peers_persist_across_restart(self):
+        self.cfg["peers"] = ["http://127.0.0.1:8334"]
+        self.chain = Chain(self.cfg, self.path)
+        restored = Chain(self.cfg, self.path)
+        self.assertEqual(restored.peers, ["http://127.0.0.1:8334"])
+
+    def test_rejects_malformed_peer_configuration(self):
+        cfg = dict(self.cfg)
+        cfg["peers"] = "http://127.0.0.1:8333"
+        with self.assertRaises(ValueError):
+            Chain(cfg, Path(self.temp.name) / "bad-peers.json")
+
     def test_block_cannot_spend_its_own_coinbase_reward(self):
         miner_key, _, miner = wallet()
         _, _, recipient = wallet()
