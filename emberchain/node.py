@@ -27,6 +27,27 @@ def broadcast(peers,path,obj):
         try: post(p+path,obj)
         except Exception: pass
 
+def synchronize_peer(chain, peer):
+    """Fetch and validate a peer's chain; adopt it only if it has more work."""
+    try:
+        status=get(peer+'/status')
+        expected={'chain_id':chain.id,'genesis_hash':chain.blocks[0]['hash'],'difficulty':chain.diff,'block_reward':chain.reward}
+        if any(status.get(k)!=v for k,v in expected.items()):
+            return False
+        candidate=get(peer+'/chain').get('chain')
+        if not chain.valid_chain(candidate):
+            return False
+        return chain.replace(candidate)[0]
+    except Exception:
+        return False
+
+def peer_sync_loop(chain, interval=10):
+    """Periodically catch up with configured and discovered peers."""
+    while True:
+        for peer in list(chain.peers):
+            synchronize_peer(chain, peer)
+        time.sleep(interval)
+
 class Chain:
     def genesis_block(self):
         alloc=self.cfg.get('genesis_allocations',{})
@@ -252,6 +273,7 @@ def main():
     if not cp.exists():raise SystemExit('Config missing. Copy config.example.json to config.json and configure it.')
     cfg=json.loads(cp.read_text()); c=Chain(cfg,a.data or f"data-{cfg.get('port',8333)}.json")
     API.chain=c;API.peers=c.peers
+    threading.Thread(target=peer_sync_loop,args=(c,),daemon=True).start()
     srv=ThreadingHTTPServer((cfg.get('host','127.0.0.1'),int(cfg.get('port',8333))),API)
     print(f"Emberchain node on {cfg.get('host')}:{cfg.get('port')} | chain={c.id} | height={len(c.blocks)-1}")
     try:srv.serve_forever()
