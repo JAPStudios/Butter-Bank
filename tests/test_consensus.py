@@ -419,6 +419,25 @@ class BFTPrimitiveTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 ConsensusHTTPServer(engine, host="0.0.0.0", port=0)
 
+    def test_signer_rejects_group_readable_state_file(self):
+        key, _ = self.keys_and_records[0]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            signer = ConsensusSigner(key, self.chain_id, self.validators, path)
+            path.chmod(0o644)
+            with self.assertRaisesRegex(ValueError, "permissions 0600"):
+                ConsensusSigner(key, self.chain_id, self.validators, path)
+
+    def test_signer_rejects_state_file_symlink(self):
+        key, _ = self.keys_and_records[0]
+        with tempfile.TemporaryDirectory() as directory:
+            real = Path(directory) / "real-state.json"
+            link = Path(directory) / "linked-state.json"
+            ConsensusSigner(key, self.chain_id, self.validators, real)
+            link.symlink_to(real)
+            with self.assertRaisesRegex(ValueError, "symbolic link"):
+                ConsensusSigner(key, self.chain_id, self.validators, link)
+
 
 if __name__ == "__main__":
     unittest.main()
