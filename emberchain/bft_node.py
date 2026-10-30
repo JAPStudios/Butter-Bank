@@ -99,9 +99,18 @@ def bft_round_timeout_loop(consensus_server, initial_timeout=10.0,
     rounds. The loop therefore cannot bypass signer anti-equivocation rules.
     """
     if (not isinstance(initial_timeout, (int, float))
-            or isinstance(initial_timeout, bool) or not math.isfinite(initial_timeout) or initial_timeout <= 0
+            or isinstance(initial_timeout, bool)
             or not isinstance(maximum_timeout, (int, float))
-            or isinstance(maximum_timeout, bool) or not math.isfinite(maximum_timeout) or maximum_timeout < initial_timeout):
+            or isinstance(maximum_timeout, bool)):
+        raise ValueError("invalid BFT round timeout configuration")
+    try:
+        initial_timeout = float(initial_timeout)
+        maximum_timeout = float(maximum_timeout)
+    except (OverflowError, ValueError):
+        raise ValueError("invalid BFT round timeout configuration")
+    if (not math.isfinite(initial_timeout) or initial_timeout <= 0
+            or not math.isfinite(maximum_timeout)
+            or maximum_timeout < initial_timeout):
         raise ValueError("invalid BFT round timeout configuration")
     stop_event = stop_event or threading.Event()
     timeout = float(initial_timeout)
