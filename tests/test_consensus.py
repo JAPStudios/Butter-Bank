@@ -83,6 +83,12 @@ class BFTPrimitiveTests(unittest.TestCase):
         self.assertFalse(verify_commit_certificate(
             votes[:1], self.validators, self.chain_id, 1, 0, self.block_hash
         ))
+        self.assertFalse(verify_commit_certificate(
+            votes, self.validators, self.chain_id, True, 0, self.block_hash
+        ))
+        self.assertFalse(verify_commit_certificate(
+            votes, self.validators, self.chain_id, 1, False, self.block_hash
+        ))
 
     def test_commit_rejects_duplicate_validator_votes(self):
         vote = make_vote(
