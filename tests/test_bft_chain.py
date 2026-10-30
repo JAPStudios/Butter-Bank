@@ -184,7 +184,15 @@ class BFTChainTests(unittest.TestCase):
                 self.validator_keys[0], self.chain_id, chain.validators,
                 Path(directory) / "offline-signer.json", initial_height=1
             )
-            signer.sign_vote(0, "prevote", "ff" * 32)
+            set_hash = validator_set_hash(chain.validators)
+            conflicting_hash = "ff" * 32
+            conflicting_prevotes = [
+                make_vote(key, self.chain_id, 1, 0, "prevote",
+                          conflicting_hash, set_hash)
+                for key in self.validator_keys[:3]
+            ]
+            signer.lock_from_prevotes(conflicting_prevotes, 0, conflicting_hash)
+            signer.sign_vote(0, "precommit", conflicting_hash)
             block = chain.build_proposal(chain.validators[0]["public_key"])
             set_hash = validator_set_hash(chain.validators)
             keys_by_public = {
