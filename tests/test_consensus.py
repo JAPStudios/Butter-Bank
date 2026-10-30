@@ -132,6 +132,7 @@ class BFTPrimitiveTests(unittest.TestCase):
             self.assertEqual(vote, reopened.sign_vote(0, 'prevote', self.block_hash))
             with self.assertRaises(ValueError):
                 reopened.sign_vote(0, 'prevote', 'cd' * 32)
+            reopened.close()
 
     def test_signer_requires_prevote_quorum_lock_before_precommit(self):
         key, _ = self.keys_and_records[0]
@@ -324,12 +325,14 @@ class BFTPrimitiveTests(unittest.TestCase):
             path = Path(directory) / "state.json"
             signer = ConsensusSigner(key, self.chain_id, self.validators, path)
             self.assertEqual(signer.advance_round(), 1)
+            signer.close()
             reopened = ConsensusSigner(key, self.chain_id, self.validators, path)
             engine = ConsensusEngine(reopened, lambda block: block.get("hash"))
             self.assertEqual(engine.round, 1)
             with self.assertRaises(ValueError):
                 reopened.sign_vote(0, "prevote", self.block_hash)
             reopened.sign_vote(1, "prevote", self.block_hash)
+            reopened.close()
 
     def test_commit_retries_after_transient_chain_persistence_failure(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -429,6 +432,7 @@ class BFTPrimitiveTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "state.json"
             signer = ConsensusSigner(key, self.chain_id, self.validators, path)
+            signer.close()
             path.chmod(0o644)
             with self.assertRaisesRegex(ValueError, "permissions 0600"):
                 ConsensusSigner(key, self.chain_id, self.validators, path)
@@ -438,7 +442,8 @@ class BFTPrimitiveTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             real = Path(directory) / "real-state.json"
             link = Path(directory) / "linked-state.json"
-            ConsensusSigner(key, self.chain_id, self.validators, real)
+            signer = ConsensusSigner(key, self.chain_id, self.validators, real)
+            signer.close()
             link.symlink_to(real)
             with self.assertRaisesRegex(ValueError, "symbolic link"):
                 ConsensusSigner(key, self.chain_id, self.validators, link)
