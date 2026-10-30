@@ -40,8 +40,12 @@ PYTHONPATH=emberchain python -m unittest discover -s tests -v
 Start a local development node:
 
 ```sh
-cp emberchain/config.example.json emberchain/config.json
-python emberchain/node.py --config emberchain/config.json --data emberchain/data-8333.json
+# Preserve any existing local configuration and legacy chain data.
+if [ ! -f emberchain/config.json ]; then
+  cp emberchain/config.example.json emberchain/config.json
+fi
+# Use a separate Milkchain data file; do not reuse an existing Emberchain database.
+python emberchain/node.py --config emberchain/config.json --data emberchain/milkchain-devnet-data.json
 ```
 
 Create and inspect a local development wallet:
