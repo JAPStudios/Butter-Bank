@@ -17,6 +17,9 @@ class BFTChain(Chain):
             raise ValueError("configuration must be a JSON object")
         if cfg.get("consensus") != "bft":
             raise ValueError("BFTChain requires consensus='bft'")
+        chain_path = Path(path)
+        if chain_path.is_symlink():
+            raise ValueError("BFT chain data file must not be a symbolic link")
         self.validators = validator_set_from_certificates(
             cfg.get("admission_certificates", []),
             cfg.get("admission_issuers", []),
