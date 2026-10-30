@@ -68,12 +68,13 @@ def load_validator_key(path):
     return Ed25519PrivateKey.from_private_bytes(seed)
 
 
-def bft_peer_sync_loop(chain, signer, interval=10):
+def bft_peer_sync_loop(chain, engine, interval=10):
+    signer = engine.signer
     while True:
         for peer in list(chain.peers):
             synchronize_peer(chain, peer)
         if signer.height < len(chain.blocks):
-            signer.catch_up(chain.blocks[signer.height:])
+            engine.catch_up(chain.blocks[signer.height:])
         elif signer.height > len(chain.blocks):
             raise RuntimeError("validator signer is ahead of the locally persisted finalized chain")
         time.sleep(interval)
@@ -128,7 +129,7 @@ def main():
     BFTAPI.consensus_key = key
 
     threading.Thread(target=consensus_server.serve_forever, daemon=True).start()
-    threading.Thread(target=bft_peer_sync_loop, args=(chain, signer), daemon=True).start()
+    threading.Thread(target=bft_peer_sync_loop, args=(chain, engine), daemon=True).start()
     http_server = ThreadingHTTPServer(
         (api_host, int(cfg.get("port", 8333))), BFTAPI
     )
