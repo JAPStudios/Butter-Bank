@@ -456,6 +456,8 @@ class BFTPrimitiveTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "already in use"):
                 ConsensusSigner(key, self.chain_id, self.validators, path)
             first.close()
+            with self.assertRaisesRegex(RuntimeError, "signer is closed"):
+                first.sign_vote(0, "prevote", self.block_hash)
             second = ConsensusSigner(key, self.chain_id, self.validators, path)
             second.close()
 
