@@ -22,20 +22,28 @@ gradle assembleDebug
 
 Serve `index.html` from a static web host. Never put private keys, recovery phrases, exchange credentials, or other secrets in the page. Configure a receiving address only after verifying the asset and network in the receiving account.
 
-## Emberchain development prototype
+## Emberchain / Biscuits development prototype
 
-The Python code is a separate educational account-based proof-of-work prototype. It is not the funding website's payment processor and is not connected to the Android application.
+The Python blockchain is separate from the funding website and Android application. The original node entry point remains an experimental proof-of-work chain. A separate BFT mode is available on the development branch through bft_node.py; it finalizes account blocks with Ed25519 validator votes and requires strictly more than two-thirds of validator voting power. BFT mode disables mining and assigns equal voting power to admitted validators.
 
 Python 3.10+:
 
 ```sh
 python -m venv .venv
 . .venv/bin/activate
-pip install -r requirements.txt
-python -m unittest discover -s tests -v
+pip install -r emberchain/requirements.txt
+PYTHONPATH=emberchain python -m unittest discover -s tests -v
 ```
 
-Do not use this prototype for real funds or expose its node API to the public internet. It still lacks production consensus, reliable chain synchronization and reorganizations, peer authentication, rate limiting, hardened key storage, and independent security review.
+For BFT validator setup, read docs/BFT_CONSENSUS.md and start from config.bft.example.json. Generate a validator key with:
+
+```sh
+PYTHONPATH=emberchain python -m keygen --output validator.key
+```
+
+The example configuration contains placeholders and cannot start a network until the issuer federation, admission certificates, validator keys, and peer/TLS settings are configured. The admission design requires at least four independent credential issuers and at least four admitted validators; issuers must enforce one credential per eligible participant off-chain.
+
+BFT mode is an integrated development prototype, not production consensus. Safe locked-round unlock and distributed timeout/round-change rules, validator-set changes and revocation activation, hardware-backed anti-rollback, formal verification, independent security audit, adversarial partition testing, and production recovery exercises remain outstanding. Do not use real funds or expose the node APIs publicly without additional security controls.
 
 ## Security and scope
 
