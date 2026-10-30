@@ -5,7 +5,7 @@ from pathlib import Path
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives import serialization
 
-from node import Chain, canon, signing_bytes
+from node import Chain, bhash, canon, signing_bytes
 
 
 def wallet():
@@ -85,6 +85,38 @@ class ChainValidationTests(unittest.TestCase):
         self.assertTrue(ok, message)
         restored = Chain(self.cfg, self.path)
         self.assertEqual(restored.pool, [tx])
+
+    def test_block_cannot_spend_its_own_coinbase_reward(self):
+        miner_key, _, miner = wallet()
+        _, _, recipient = wallet()
+        tx = {
+            "chain_id": self.cfg["chain_id"],
+            "sender": miner,
+            "recipient": recipient,
+            "amount": 50,
+            "fee": 0,
+            "nonce": 1,
+        }
+        tx["signature"] = miner_key.sign(signing_bytes(tx)).hex()
+        block = {
+            "height": 1,
+            "previous_hash": self.chain.blocks[0]["hash"],
+            "timestamp": 1,
+            "transactions": [
+                {"type": "coinbase", "recipient": miner, "amount": 50},
+                tx,
+            ],
+            "nonce": 0,
+        }
+        while True:
+            block["hash"] = bhash(block)
+            if block["hash"].startswith("0" * self.cfg["difficulty"]):
+                break
+            block["nonce"] += 1
+
+        # The miner has no funds before this block. Its reward must not be
+        # spendable by a transaction included in the same block.
+        self.assertFalse(self.chain.valid_chain([self.chain.blocks[0], block]))
 
     def test_sync_revalidates_pending_transactions(self):
         _, _, miner = wallet()
