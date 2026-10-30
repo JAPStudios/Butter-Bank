@@ -73,6 +73,17 @@ class AdmissionCertificateTests(unittest.TestCase):
                 [self.certificate(), self.certificate()],
                 self.issuers, self.chain_id, 15
             )
+        with self.assertRaises(ValueError):
+            issuer_set_hash([
+                self.issuers[0], self.issuers[0].upper(),
+                self.issuers[1], self.issuers[2]
+            ])
+        case_duplicate = self.certificate(validator_key=self.validator.upper())
+        with self.assertRaises(ValueError):
+            validator_set_from_certificates(
+                [self.certificate(), case_duplicate],
+                self.issuers, self.chain_id, 15
+            )
 
     def test_keygen_creates_owner_only_key_and_never_overwrites(self):
         with tempfile.TemporaryDirectory() as directory:
