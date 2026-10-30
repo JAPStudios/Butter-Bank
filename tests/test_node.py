@@ -1,11 +1,15 @@
+import json
 import tempfile
+import threading
 import unittest
+import urllib.request
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives import serialization
 
-from node import Chain, bhash, canon, signing_bytes
+from node import API, Chain, bhash, canon, signing_bytes
 
 
 def wallet():
@@ -140,6 +144,35 @@ class ChainValidationTests(unittest.TestCase):
         remote.mine(second_miner)
         self.assertTrue(self.chain.replace(remote.blocks)[0])
         self.assertEqual(len(self.chain.blocks), 3)
+
+
+    def test_receive_chain_endpoint_synchronizes_a_longer_fork(self):
+        _, _, first_miner = wallet()
+        _, _, second_miner = wallet()
+        remote = Chain(self.cfg, Path(self.temp.name) / "remote-sync.json")
+        remote.mine(first_miner)
+        remote.mine(second_miner)
+
+        API.chain = self.chain
+        API.peers = []
+        server = ThreadingHTTPServer(("127.0.0.1", 0), API)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(thread.join, 2)
+        self.addCleanup(server.shutdown)
+
+        payload = json.dumps({"chain": remote.blocks}).encode()
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_port}/receive-chain",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=3) as response:
+            result = json.loads(response.read())
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(self.chain.blocks, remote.blocks)
 
 
 if __name__ == "__main__":
