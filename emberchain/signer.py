@@ -34,6 +34,8 @@ class ConsensusSigner:
         self.path = Path(state_path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.lock_path = self.path.with_name(self.path.name + ".lock")
+        if self.path.is_symlink():
+            raise ValueError("validator state file must not be a symbolic link")
         if self.lock_path.is_symlink():
             raise ValueError("validator state lock path must not be a symbolic link")
         lock_flags = os.O_CREAT | os.O_RDWR
@@ -47,15 +49,22 @@ class ConsensusSigner:
             os.close(self._lock_fd)
             self._lock_fd = None
             raise RuntimeError("validator state is already in use by another process")
-        if self.path.is_symlink():
-            raise ValueError("validator state file must not be a symbolic link")
         if self.path.exists():
-            metadata = self.path.stat()
-            if not stat.S_ISREG(metadata.st_mode):
-                raise ValueError("validator state path must be a regular file")
-            if metadata.st_mode & 0o077:
-                raise ValueError("validator state file must have permissions 0600")
-            self.state = json.loads(self.path.read_text(encoding="utf-8"))
+            state_flags = os.O_RDONLY
+            if hasattr(os, "O_NOFOLLOW"):
+                state_flags |= os.O_NOFOLLOW
+            try:
+                state_fd = os.open(self.path, state_flags)
+            except OSError as exc:
+                self.close()
+                raise ValueError("validator state file cannot be opened safely") from exc
+            metadata = os.fstat(state_fd)
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077:
+                os.close(state_fd)
+                self.close()
+                raise ValueError("validator state file must be a regular file with permissions 0600")
+            with os.fdopen(state_fd, "r", encoding="utf-8") as stream:
+                self.state = json.load(stream)
             if (not isinstance(self.state, dict)
                     or self.state.get("chain_id") != chain_id
                     or self.state.get("validator_set_hash") != self.validators_hash
