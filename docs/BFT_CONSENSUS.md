@@ -25,3 +25,22 @@ The admission module is a mechanism, not a preselected list of real-world issuer
 ## Not yet integrated with the existing node
 
 The existing node.py chain remains proof-of-work. The BFT modules in this branch are separate components and do not yet replace proof-of-work block acceptance, persistence, peer synchronization, or transaction finalization. Do not advertise the current repository as a running BFT network until that integration and its end-to-end tests are complete.
+
+
+## Running a development validator
+
+1. Generate a key file with owner-only permissions:
+
+   `PYTHONPATH=emberchain python -m keygen --output validator.key`
+
+2. Have the configured issuer federation sign an admission certificate for the printed public key. Configure the issuer public keys, certificate signatures, and current admission epoch in a copy of config.bft.example.json. The example intentionally contains placeholders and is not a runnable network configuration.
+
+3. For a remote consensus listener, configure a TLS certificate and key, bind consensus_host to the public interface, and use HTTPS URLs in consensus_peers. A non-loopback listener without TLS is rejected. Keep validator.key and the signer state file backed up securely; never commit either file.
+
+4. Start the BFT node:
+
+   `PYTHONPATH=emberchain python emberchain/bft_node.py --config config.bft.json`
+
+5. The selected proposer can request a proposal through the local node API using POST /propose with an empty JSON object. Validators automatically prevote only after local block validation. Finality requires more than two-thirds of the admitted voting power.
+
+This run mode is a development prototype. It currently has no safe unlock/round-timeout protocol, no automatic validator-set transition or revocation activation, and no automatic recovery from a crash between signer finalization and chain-file persistence. A signer-height mismatch causes startup to fail closed. Do not use real funds or deploy a public mainnet with this version.
