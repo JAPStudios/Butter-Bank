@@ -6,6 +6,7 @@ from pathlib import Path
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from keygen import generate_keypair
+from admission_signer import create_issuer_signature
 
 from admission import (
     admission_signing_bytes,
@@ -94,6 +95,20 @@ class AdmissionCertificateTests(unittest.TestCase):
             self.assertEqual(private.public_key().public_bytes_raw().hex(), public)
             with self.assertRaises(FileExistsError):
                 generate_keypair(path)
+
+    def test_issuer_cli_signs_only_for_a_configured_issuer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "issuer.key"
+            path.write_text(self.issuer_keys[0].private_bytes_raw().hex())
+            path.chmod(0o600)
+            signature = create_issuer_signature(
+                path, self.issuers, self.chain_id, self.validator, 10, 20
+            )
+            self.assertEqual(signature["issuer"], self.issuers[0])
+            with self.assertRaises(ValueError):
+                create_issuer_signature(
+                    path, self.issuers[1:], self.chain_id, self.validator, 10, 20
+                )
 
 
 if __name__ == "__main__":
