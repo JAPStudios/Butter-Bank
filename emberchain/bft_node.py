@@ -11,7 +11,6 @@ from urllib.parse import urlparse
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from admission import issuer_set_hash
 from consensus import make_proposal, select_proposer
 from consensus_network import ConsensusHTTPServer
 from engine import ConsensusEngine
@@ -99,8 +98,10 @@ def main():
         engine,
         peers=cfg.get("consensus_peers", []),
         on_finalized=persist_finalized,
-        host=cfg.get("consensus_host", "0.0.0.0"),
+        host=cfg.get("consensus_host", "127.0.0.1"),
         port=int(cfg.get("consensus_port", 8334)),
+        tls_certfile=cfg.get("consensus_tls_certfile"),
+        tls_keyfile=cfg.get("consensus_tls_keyfile"),
     )
     BFTAPI.chain = chain
     BFTAPI.peers = chain.peers
