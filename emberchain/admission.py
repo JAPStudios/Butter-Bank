@@ -15,8 +15,8 @@ from consensus import canonical_json, _is_hex
 
 
 def normalize_issuers(issuers):
-    if not isinstance(issuers, Sequence) or isinstance(issuers, (str, bytes)) or not issuers:
-        raise ValueError("issuers must be a non-empty sequence")
+    if not isinstance(issuers, Sequence) or isinstance(issuers, (str, bytes)) or len(issuers) < 4:
+        raise ValueError("at least four independent credential issuers are required")
     keys = []
     for item in issuers:
         key = item.get("public_key") if isinstance(item, Mapping) else item
@@ -113,6 +113,6 @@ def validator_set_from_certificates(certificates, issuers, chain_id, current_epo
             raise ValueError("duplicate admitted validator")
         seen.add(key)
         result.append({"public_key": key, "voting_power": 1})
-    if not result:
-        raise ValueError("validator set cannot be empty")
+    if len(result) < 4:
+        raise ValueError("at least four admitted validators are required for BFT fault tolerance")
     return sorted(result, key=lambda item: item["public_key"])
