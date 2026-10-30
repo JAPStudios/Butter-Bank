@@ -489,9 +489,15 @@ class BFTPrimitiveTests(unittest.TestCase):
                 Path(directory) / "state.json"
             )
             engine = ConsensusEngine(signer, lambda block: block.get("hash"))
+            stale = make_vote(
+                self.keys_and_records[1][0], self.chain_id, 1, 0,
+                "prevote", self.block_hash, self.set_hash
+            )
+            stale["height"] = 0
+            self.assertIsNone(engine.receive_vote(stale))
             for height, round_number, chain_id in (
-                (0, 0, self.chain_id), (2, 0, self.chain_id),
-                (1, 1, self.chain_id), (1, 0, "other-chain")
+                (2, 0, self.chain_id), (1, 1, self.chain_id),
+                (1, 0, "other-chain")
             ):
                 vote = make_vote(
                     self.keys_and_records[1][0], chain_id, height, round_number,
