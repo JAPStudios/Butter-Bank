@@ -22,7 +22,7 @@ python wallet.py create alice-wallet.json
 python wallet.py create bob-wallet.json
 ```
 
-Wallet JSON contains an unencrypted private key. Keep it secret; do not commit it to source control.
+Wallet JSON contains an unencrypted private key. Keep it secret; do not commit it to source control. A previously tracked `miner-wallet.json` was removed from the repository, but deleting it does not invalidate the exposed key: treat that key as compromised and never use it for funds. Rotate any allocation or account that depended on it.
 
 ## Configure genesis
 
