@@ -2,6 +2,7 @@
 import json
 import os
 import stat
+import fcntl
 import tempfile
 import threading
 from pathlib import Path
@@ -32,6 +33,20 @@ class ConsensusSigner:
         self.validators_hash = validator_set_hash(validators)
         self.path = Path(state_path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.lock_path = self.path.with_name(self.path.name + ".lock")
+        if self.lock_path.is_symlink():
+            raise ValueError("validator state lock path must not be a symbolic link")
+        lock_flags = os.O_CREAT | os.O_RDWR
+        if hasattr(os, "O_NOFOLLOW"):
+            lock_flags |= os.O_NOFOLLOW
+        self._lock_fd = os.open(self.lock_path, lock_flags, 0o600)
+        os.fchmod(self._lock_fd, 0o600)
+        try:
+            fcntl.flock(self._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.close(self._lock_fd)
+            self._lock_fd = None
+            raise RuntimeError("validator state is already in use by another process")
         if self.path.is_symlink():
             raise ValueError("validator state file must not be a symbolic link")
         if self.path.exists():
@@ -102,6 +117,19 @@ class ConsensusSigner:
                           "public_key": self.public_key, "height": initial_height,
                           "round": 0, "lock": None, "locked_round": None, "signed": {}}
             self._save()
+
+    def close(self):
+        """Release the exclusive process lock when this validator stops."""
+        if getattr(self, "_lock_fd", None) is not None:
+            fcntl.flock(self._lock_fd, fcntl.LOCK_UN)
+            os.close(self._lock_fd)
+            self._lock_fd = None
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
 
     @property
     def height(self):
