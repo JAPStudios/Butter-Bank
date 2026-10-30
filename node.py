@@ -201,14 +201,16 @@ class API(BaseHTTPRequestHandler):
             d=self.body(); p=urlparse(self.path).path
             if p in ('/tx','/receive-tx'):
                 ok,msg=self.chain.add_tx(d)
-                if ok and p=='/tx':broadcast(self.peers,'/receive-tx',d)
+                if ok: broadcast(self.peers,'/receive-tx',d)
                 self.sendj(200 if ok else 400,{'ok':ok,'message':msg})
             elif p in ('/mine',):
                 b,msg=self.chain.mine(d.get('miner',''))
                 if b: broadcast(self.peers,'/receive-block',b); self.sendj(200,{'ok':True,'block':b})
                 else:self.sendj(400,{'ok':False,'message':msg})
             elif p=='/receive-block':
-                ok,msg=self.chain.accept_block(d); self.sendj(200 if ok else 400,{'ok':ok,'message':msg})
+                ok,msg=self.chain.accept_block(d)
+                if ok: broadcast(self.peers,'/receive-block',d)
+                self.sendj(200 if ok else 400,{'ok':ok,'message':msg})
             elif p=='/connect':
                 raw_peer=d.get('peer')
                 if not isinstance(raw_peer,str): self.sendj(400,{'error':'peer must be an HTTP(S) URL'});return
