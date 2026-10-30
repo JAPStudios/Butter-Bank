@@ -56,7 +56,7 @@ class MainActivity : Activity() {
 
     private fun buildScreen(): View {
         val scroll = ScrollView(this).apply {
-            fillViewport = true
+            isFillViewport = true
             setBackgroundColor(0xFFF3F5F0.toInt())
         }
         val page = LinearLayout(this).apply {
@@ -342,7 +342,7 @@ class MainActivity : Activity() {
         EditText(this).apply {
             hint = hintText
             textSize = 15f
-            singleLine = true
+            isSingleLine = true
             inputType = if (decimal) {
                 InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
             } else {
