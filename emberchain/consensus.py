@@ -150,13 +150,17 @@ def verify_proposal(
         expected_set_hash = validator_set_hash(validators)
         if proposal["validator_set_hash"] != expected_set_hash:
             return False
+        if (not isinstance(proposal["block_hash"], str)
+                or proposal["block_hash"] != proposal["block_hash"].lower()):
+            return False
         if proposer != select_proposer(validators, proposal["height"], proposal["round"]):
             return False
         message = proposal_signing_bytes(
             expected_chain_id, proposal["height"], proposal["round"],
             proposal["block_hash"], expected_set_hash,
         )
-        if not _is_hex(proposal["signature"], 64):
+        if (not _is_hex(proposal["signature"], 64)
+                or proposal["signature"] != proposal["signature"].lower()):
             return False
         Ed25519PublicKey.from_public_bytes(bytes.fromhex(proposer)).verify(
             bytes.fromhex(proposal["signature"]), message
@@ -213,11 +217,15 @@ def verify_vote(
             return False
         if vote["validator_set_hash"] != validator_set_hash(validators):
             return False
+        if (not isinstance(vote["block_hash"], str)
+                or vote["block_hash"] != vote["block_hash"].lower()):
+            return False
         message = vote_signing_bytes(
             expected_chain_id, vote["height"], vote["round"], vote["step"],
             vote["block_hash"], vote["validator_set_hash"],
         )
-        if not _is_hex(vote["signature"], 64):
+        if (not _is_hex(vote["signature"], 64)
+                or vote["signature"] != vote["signature"].lower()):
             return False
         Ed25519PublicKey.from_public_bytes(bytes.fromhex(key)).verify(
             bytes.fromhex(vote["signature"]), message
