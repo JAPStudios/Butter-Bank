@@ -452,6 +452,16 @@ class BFTChainTests(unittest.TestCase):
                 for thread in threads:
                     thread.join(timeout=2)
 
+    @unittest.skipIf(os.name == "nt", "POSIX symlink semantics")
+    def test_bft_chain_rejects_symlinked_chain_data_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            real = Path(directory) / "real-chain.json"
+            link = Path(directory) / "linked-chain.json"
+            BFTChain(self.cfg, real)
+            link.symlink_to(real)
+            with self.assertRaisesRegex(ValueError, "symbolic link"):
+                BFTChain(self.cfg, link)
+
 
 if __name__ == "__main__":
     unittest.main()
