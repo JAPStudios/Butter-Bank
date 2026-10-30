@@ -211,6 +211,15 @@ class API(BaseHTTPRequestHandler):
                 ok,msg=self.chain.accept_block(d)
                 if ok: broadcast(self.peers,'/receive-block',d)
                 self.sendj(200 if ok else 400,{'ok':ok,'message':msg})
+            elif p=='/receive-chain':
+                candidate=d.get('chain')
+                if not isinstance(candidate,list):
+                    self.sendj(400,{'ok':False,'message':'chain must be a list'});return
+                ok,msg=self.chain.replace(candidate)
+                if ok:
+                    with self.chain.lock: accepted_chain=list(self.chain.blocks)
+                    broadcast(self.peers,'/receive-chain',{'chain':accepted_chain})
+                self.sendj(200 if ok else 400,{'ok':ok,'message':msg})
             elif p=='/connect':
                 raw_peer=d.get('peer')
                 if not isinstance(raw_peer,str): self.sendj(400,{'error':'peer must be an HTTP(S) URL'});return
