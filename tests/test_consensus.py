@@ -39,8 +39,11 @@ class BFTPrimitiveTests(unittest.TestCase):
             validator_set_hash(invalid)
 
     def test_proposal_signature_and_validator_membership(self):
+        proposer = select_proposer(self.validators, 1, 0)
+        proposer_key = next(key for key, record in self.keys_and_records
+                            if record["public_key"] == proposer)
         proposal = make_proposal(
-            self.keys_and_records[0][0], self.chain_id, 1, 0,
+            proposer_key, self.chain_id, 1, 0,
             self.block_hash, self.set_hash,
         )
         self.assertTrue(verify_proposal(proposal, self.validators, self.chain_id))
