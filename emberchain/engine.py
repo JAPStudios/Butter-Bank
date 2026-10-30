@@ -101,34 +101,44 @@ class ConsensusEngine:
             except ValueError:
                 return None
 
-        block_hash = vote["block_hash"]
-        block = self.proposals.get(block_hash)
-        if block is None:
-            return None
-        result = {
-            "height": vote["height"],
-            "round": self.round,
-            "block_hash": block_hash,
-            "block": block,
-            "commit_votes": matching,
-        }
-        # Persist the finalized block before advancing the signer height. If the
-        # process crashes between these writes, startup can verify and catch up
-        # from the committed chain without losing anti-equivocation history.
-        if self.on_finalized is not None:
+        return self.retry_pending_finalization()
+
+    def retry_pending_finalization(self):
+        """Retry a quorum commit after a transient block-persistence failure."""
+        slot = (self.round, "precommit")
+        by_hash = defaultdict(list)
+        for item in self.votes.get(slot, {}).values():
+            by_hash[item["block_hash"]].append(item)
+        for block_hash, matching in by_hash.items():
+            power = sum(self.signer.validators[item["validator"]] for item in matching)
+            if power * 3 <= self.total_power * 2:
+                continue
+            block = self.proposals.get(block_hash)
+            if block is None:
+                continue
+            result = {
+                "height": self.height,
+                "round": self.round,
+                "block_hash": block_hash,
+                "block": block,
+                "commit_votes": matching,
+            }
+            # Persist the finalized block before advancing signer height.
+            if self.on_finalized is not None:
+                try:
+                    self.on_finalized(result)
+                except Exception:
+                    continue
             try:
-                self.on_finalized(result)
-            except Exception:
-                return None
-        try:
-            self.signer.finalize(matching, self.round, block_hash)
-        except ValueError:
-            return None
-        self.finalized[result["height"]] = result
-        self.round = 0
-        self.proposals.clear()
-        self.votes.clear()
-        return result
+                self.signer.finalize(matching, self.round, block_hash)
+            except ValueError:
+                continue
+            self.finalized[result["height"]] = result
+            self.round = 0
+            self.proposals.clear()
+            self.votes.clear()
+            return result
+        return None
 
     def advance_round(self):
         """Advance only while unlocked; locked-round unlock rules are not yet safe."""
