@@ -235,6 +235,111 @@ def verify_vote(
         return False
 
 
+
+def round_change_signing_bytes(chain_id: str, height: int, round_number: int,
+                               validators_hash: str) -> bytes:
+    """Canonical signed request to enter a later consensus round.
+
+    This message is only a timeout/round-change signal. It carries no authority
+    to discard a lock or to vote for a different block.
+    """
+    if not isinstance(chain_id, str) or not chain_id.strip():
+        raise ValueError("chain_id must be non-empty")
+    if not isinstance(height, int) or isinstance(height, bool) or height < 1:
+        raise ValueError("height must be positive")
+    if (not isinstance(round_number, int) or isinstance(round_number, bool)
+            or round_number < 1):
+        raise ValueError("round_number must be positive")
+    if not _is_hex(validators_hash, 32):
+        raise ValueError("validators_hash must be 32-byte hex")
+    return canonical_json({
+        "message": "biscuits/bft/round-change/v1",
+        "chain_id": chain_id,
+        "height": height,
+        "round": round_number,
+        "validator_set_hash": validators_hash.lower(),
+    })
+
+
+def make_round_change(private_key: Ed25519PrivateKey, chain_id: str,
+                      height: int, round_number: int,
+                      validators_hash: str) -> dict[str, object]:
+    """Create an authenticated request to move to round_number."""
+    public_key = private_key.public_key().public_bytes_raw().hex()
+    message = round_change_signing_bytes(
+        chain_id, height, round_number, validators_hash
+    )
+    return {
+        "chain_id": chain_id,
+        "height": height,
+        "round": round_number,
+        "validator_set_hash": validators_hash.lower(),
+        "validator": public_key,
+        "signature": private_key.sign(message).hex(),
+    }
+
+
+def verify_round_change(message: Mapping[str, object],
+                        validators: Sequence[Mapping[str, object]],
+                        expected_chain_id: str) -> bool:
+    """Verify a round-change signal; it does not itself advance local state."""
+    try:
+        if set(message) != {
+            "chain_id", "height", "round", "validator_set_hash",
+            "validator", "signature",
+        }:
+            return False
+        normalized = normalize_validator_set(validators)
+        key = message["validator"]
+        if key not in normalized or message["chain_id"] != expected_chain_id:
+            return False
+        expected_hash = validator_set_hash(validators)
+        if message["validator_set_hash"] != expected_hash:
+            return False
+        if (not _is_hex(key, 32) or not _is_hex(message["signature"], 64)
+                or message["signature"] != message["signature"].lower()):
+            return False
+        payload = round_change_signing_bytes(
+            expected_chain_id, message["height"], message["round"], expected_hash
+        )
+        Ed25519PublicKey.from_public_bytes(bytes.fromhex(key)).verify(
+            bytes.fromhex(message["signature"]), payload
+        )
+        return True
+    except (ValueError, TypeError, KeyError, InvalidSignature):
+        return False
+
+
+def verify_round_change_certificate(messages: Sequence[Mapping[str, object]],
+                                    validators: Sequence[Mapping[str, object]],
+                                    expected_chain_id: str, height: int,
+                                    round_number: int) -> bool:
+    """Require unique authenticated signals with strictly >2/3 voting power."""
+    try:
+        if (not isinstance(height, int) or isinstance(height, bool) or height < 1
+                or not isinstance(round_number, int) or isinstance(round_number, bool)
+                or round_number < 1
+                or not isinstance(messages, Sequence)
+                or isinstance(messages, (str, bytes))):
+            return False
+        normalized = normalize_validator_set(validators)
+        seen = set()
+        power = 0
+        for message in messages:
+            if (not verify_round_change(message, validators, expected_chain_id)
+                    or message["height"] != height
+                    or message["round"] != round_number):
+                return False
+            key = message["validator"]
+            if key in seen:
+                return False
+            seen.add(key)
+            power += normalized[key]
+        return power * 3 > sum(normalized.values()) * 2
+    except (ValueError, TypeError, KeyError):
+        return False
+
+
 def verify_commit_certificate(
     votes: Sequence[Mapping[str, object]],
     validators: Sequence[Mapping[str, object]],
