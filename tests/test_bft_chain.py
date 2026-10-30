@@ -1,11 +1,17 @@
 import tempfile
 import unittest
+import threading
+import time
 from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from admission import issuer_set_hash, sign_admission
 from bft_chain import BFTChain
+from consensus import make_proposal, select_proposer
+from consensus_network import ConsensusHTTPServer
+from engine import ConsensusEngine
+from signer import ConsensusSigner
 from consensus import make_vote, validator_set_hash
 
 
@@ -86,6 +92,66 @@ class BFTChainTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             chain = BFTChain(self.cfg, Path(directory) / "chain.json")
             self.assertFalse(chain.replace([chain.genesis_block(), {}])[0])
+
+    def test_four_node_network_reaches_bft_finality(self):
+        with tempfile.TemporaryDirectory() as directory:
+            chains = []
+            servers = []
+            threads = []
+            for index, key in enumerate(self.validator_keys):
+                chain = BFTChain(self.cfg, Path(directory) / f"chain-{index}.json")
+                signer = ConsensusSigner(
+                    key, self.chain_id, chain.validators,
+                    Path(directory) / f"signer-{index}.json"
+                )
+                engine = ConsensusEngine(signer, chain.validate_proposal_block)
+
+                def persist(result, target=chain):
+                    ok, message = target.accept_finalized_block(
+                        result["block"], result["round"], result["commit_votes"]
+                    )
+                    if not ok:
+                        raise RuntimeError(message)
+
+                server = ConsensusHTTPServer(
+                    engine, host="127.0.0.1", port=0, on_finalized=persist
+                )
+                chains.append(chain)
+                servers.append(server)
+            urls = [
+                "http://127.0.0.1:" + str(server.server.server_address[1])
+                for server in servers
+            ]
+            for index, server in enumerate(servers):
+                server.peers = [url for peer_index, url in enumerate(urls)
+                                if peer_index != index]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                threads.append(thread)
+            try:
+                selected = select_proposer(chains[0].validators, 1, 0)
+                proposer_index = next(
+                    i for i, key in enumerate(self.validator_keys)
+                    if key.public_key().public_bytes_raw().hex() == selected
+                )
+                proposer_key = self.validator_keys[proposer_index]
+                block = chains[proposer_index].build_proposal(selected)
+                proposal = make_proposal(
+                    proposer_key, self.chain_id, 1, 0, block["hash"],
+                    validator_set_hash(chains[0].validators)
+                )
+                servers[proposer_index].publish_proposal(proposal, block)
+                deadline = time.time() + 10
+                while time.time() < deadline and any(len(chain.blocks) != 2 for chain in chains):
+                    time.sleep(0.05)
+                self.assertTrue(all(len(chain.blocks) == 2 for chain in chains),
+                                "all four validators should finalize the same block")
+                self.assertEqual(len({chain.blocks[-1]["hash"] for chain in chains}), 1)
+            finally:
+                for server in servers:
+                    server.shutdown()
+                for thread in threads:
+                    thread.join(timeout=2)
 
 
 if __name__ == "__main__":
