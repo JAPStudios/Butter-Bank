@@ -109,6 +109,52 @@ class BFTPrimitiveTests(unittest.TestCase):
         altered = dict(messages[0], round=2)
         self.assertFalse(verify_round_change(altered, self.validators, self.chain_id))
 
+
+    def test_engine_advances_only_after_persisted_round_change_quorum(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "round-change-state.json"
+            signer = ConsensusSigner(
+                self.keys_and_records[0][0], self.chain_id, self.validators, path
+            )
+            engine = ConsensusEngine(signer, lambda block: block.get("hash"))
+            local = engine.request_round_change(1)
+            self.assertIsNone(engine.receive_round_change(
+                make_round_change(self.keys_and_records[1][0], self.chain_id, 1, 1, self.set_hash)
+            ))
+            result = engine.receive_round_change(
+                make_round_change(self.keys_and_records[2][0], self.chain_id, 1, 1, self.set_hash)
+            )
+            self.assertEqual(result["round"], 1)
+            self.assertEqual(engine.round, 1)
+            signer.close()
+            reopened = ConsensusSigner(
+                self.keys_and_records[0][0], self.chain_id, self.validators, path
+            )
+            self.assertEqual(reopened.current_round, 1)
+            self.assertEqual(reopened.state["signed_round_changes"]["1"], local)
+            reopened.close()
+
+    def test_locked_signer_cannot_sign_or_accept_round_change_certificate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            signer = ConsensusSigner(
+                self.keys_and_records[0][0], self.chain_id, self.validators,
+                Path(directory) / "locked-round-state.json"
+            )
+            prevotes = [
+                make_vote(key, self.chain_id, 1, 0, "prevote", self.block_hash, self.set_hash)
+                for key, _ in self.keys_and_records[:3]
+            ]
+            signer.lock_from_prevotes(prevotes, 0, self.block_hash)
+            with self.assertRaises(RuntimeError):
+                signer.sign_round_change(1)
+            certificate = [
+                make_round_change(key, self.chain_id, 1, 1, self.set_hash)
+                for key, _ in self.keys_and_records[:3]
+            ]
+            with self.assertRaises(RuntimeError):
+                signer.advance_round(certificate)
+            signer.close()
+
     def test_round_change_is_chain_and_validator_set_bound(self):
         message = make_round_change(
             self.keys_and_records[0][0], self.chain_id, 1, 2, self.set_hash
