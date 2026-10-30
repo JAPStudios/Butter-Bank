@@ -170,6 +170,15 @@ class ConsensusSigner:
         self._save()
         return vote
 
+    def _has_conflicting_precommit(self, height, block_hash):
+        for slot, entry in self.state["signed"].items():
+            parts = slot.split(":")
+            if (len(parts) == 3 and parts[2] == "precommit"
+                    and parts[0].isdigit() and int(parts[0]) == height
+                    and entry.get("block_hash") != block_hash):
+                return True
+        return False
+
     def catch_up(self, finalized_blocks):
         """Advance over committed blocks, preserving evidence of conflicting local votes."""
         for block in finalized_blocks:
@@ -194,8 +203,9 @@ class ConsensusSigner:
                     signed_height = int(slot.split(":", 1)[0])
                 except (ValueError, AttributeError):
                     raise ValueError("invalid persisted signing slot")
-                if signed_height == height and entry.get("block_hash") != block_hash:
-                    raise ValueError("finalized history conflicts with a locally signed vote")
+                if (signed_height == height and slot.split(":")[2] == "precommit"
+                        and entry.get("block_hash") != block_hash):
+                    raise ValueError("finalized history conflicts with a locally signed precommit")
             self.state["height"] = height + 1
             self.state["round"] = 0
             self.state["lock"] = None
@@ -211,6 +221,8 @@ class ConsensusSigner:
             raise ValueError("invalid commit certificate")
         if self.state["lock"] not in (None, block_hash):
             raise ValueError("finalized block conflicts with the persisted lock")
+        if self._has_conflicting_precommit(self.height, block_hash):
+            raise ValueError("finalized block conflicts with a locally signed precommit")
         self.state["height"] += 1
         self.state["round"] = 0
         self.state["lock"] = None
