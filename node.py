@@ -52,12 +52,21 @@ class Chain:
     def save(self):
         tmp=self.path.with_suffix('.tmp'); tmp.write_text(json.dumps({'chain_id':self.id,'chain':self.blocks,'mempool':self.pool},indent=2)); tmp.replace(self.path)
     def state(self,blocks=None):
-        bs=self.blocks if blocks is None else blocks; bal=dict(bs[0]['transactions'][0]['allocations']); nonce={a:0 for a in bal}
+        bs=self.blocks if blocks is None else blocks
+        bal=dict(bs[0]['transactions'][0]['allocations'])
+        nonce={a:0 for a in bal}
         for b in bs[1:]:
-            for tx in b['transactions']:
-                if tx.get('type')=='coinbase': bal[tx['recipient']]=bal.get(tx['recipient'],0)+tx['amount']; nonce.setdefault(tx['recipient'],0)
-                else:
-                    s,r=tx['sender'],tx['recipient']; bal[s]=bal.get(s,0)-tx['amount']-tx['fee']; bal[r]=bal.get(r,0)+tx['amount']; nonce[s]=nonce.get(s,0)+1; nonce.setdefault(r,0)
+            # Transactions execute against the state at the start of the block.
+            # The block reward and collected fees are credited only after them.
+            for tx in b['transactions'][1:]:
+                s,r=tx['sender'],tx['recipient']
+                bal[s]=bal.get(s,0)-tx['amount']-tx['fee']
+                bal[r]=bal.get(r,0)+tx['amount']
+                nonce[s]=nonce.get(s,0)+1
+                nonce.setdefault(r,0)
+            cb=b['transactions'][0]
+            bal[cb['recipient']]=bal.get(cb['recipient'],0)+cb['amount']
+            nonce.setdefault(cb['recipient'],0)
         return bal,nonce
     def check_tx(self,tx,bal,nonces):
         fields={'chain_id','sender','recipient','amount','fee','nonce','signature'}
@@ -93,11 +102,18 @@ class Chain:
                     if not isinstance(tx,dict) or not isinstance(tx.get('fee'),int) or isinstance(tx.get('fee'),bool) or tx['fee']<0: return False
                     fees+=tx['fee']
                 if cb['amount']!=self.reward+fees: return False
-                bal[cb['recipient']]=bal.get(cb['recipient'],0)+cb['amount']; nonces.setdefault(cb['recipient'],0)
+                # Validate and apply ordinary transactions before crediting
+                # this block's coinbase, preventing same-block reward spending.
                 for tx in txs[1:]:
                     ok,_=self.check_tx(tx,bal,nonces)
                     if not ok: return False
-                    s,r=tx['sender'],tx['recipient']; bal[s]-=tx['amount']+tx['fee']; bal[r]=bal.get(r,0)+tx['amount']; nonces[s]=tx['nonce']; nonces.setdefault(r,0)
+                    s,r=tx['sender'],tx['recipient']
+                    bal[s]-=tx['amount']+tx['fee']
+                    bal[r]=bal.get(r,0)+tx['amount']
+                    nonces[s]=tx['nonce']
+                    nonces.setdefault(r,0)
+                bal[cb['recipient']]=bal.get(cb['recipient'],0)+cb['amount']
+                nonces.setdefault(cb['recipient'],0)
             return True
         except (KeyError,TypeError,ValueError,OverflowError): return False
     def add_tx(self,tx):
@@ -123,12 +139,12 @@ class Chain:
                 b['hash']=bhash(b)
                 if b['hash'].startswith('0'*self.diff):break
                 b['nonce']+=1
-            self.blocks.append(b); chosen_ids={sha(canon(t)) for t in chosen}; self.pool=[t for t in self.pool if sha(canon(t)) not in chosen_ids]; self.save(); return b,'mined'
+            self.blocks.append(b); chosen_ids={sha(canon(t)) for t in chosen}; self.pool=[t for t in self.pool if sha(canon(t)) not in chosen_ids]; self._revalidate_pool(); self.save(); return b,'mined'
     def accept_block(self,b):
         with self.lock:
             candidate=self.blocks+[b]
             if not self.valid_chain(candidate):return False,'invalid block'
-            self.blocks=candidate; included={sha(canon(t)) for t in b['transactions'][1:]}; self.pool=[t for t in self.pool if sha(canon(t)) not in included]; self.save(); return True,'accepted'
+            self.blocks=candidate; included={sha(canon(t)) for t in b['transactions'][1:]}; self.pool=[t for t in self.pool if sha(canon(t)) not in included]; self._revalidate_pool(); self.save(); return True,'accepted'
     def _revalidate_pool(self):
         bal,nonces=self.state(); accepted=[]
         candidates=[tx for tx in self.pool if isinstance(tx,dict)]
