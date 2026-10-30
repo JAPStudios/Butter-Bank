@@ -70,6 +70,7 @@ class ChainValidationTests(unittest.TestCase):
         key, _, sender = wallet()
         _, _, recipient = wallet()
         self.cfg["genesis_allocations"] = {sender: 1000}
+        self.path = Path(self.temp.name) / "funded-chain.json"
         self.chain = Chain(self.cfg, self.path)
         tx = {
             "chain_id": self.cfg["chain_id"],
