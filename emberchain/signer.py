@@ -34,18 +34,32 @@ class ConsensusSigner:
                 raise ValueError("invalid persisted consensus height")
             if not isinstance(self.state.get("signed"), dict):
                 raise ValueError("invalid persisted signing history")
+            if "round" not in self.state:
+                self.state["round"] = 0
+            if (not isinstance(self.state["round"], int) or isinstance(self.state["round"], bool)
+                    or self.state["round"] < 0):
+                raise ValueError("invalid persisted consensus round")
             lock = self.state.get("lock")
             if lock is not None and (not isinstance(lock, str) or len(lock) != 64):
                 raise ValueError("invalid persisted lock")
         else:
             self.state = {"chain_id": chain_id, "validator_set_hash": self.validators_hash,
                           "public_key": self.public_key, "height": initial_height,
-                          "lock": None, "locked_round": None, "signed": {}}
+                          "round": 0, "lock": None, "locked_round": None, "signed": {}}
             self._save()
 
     @property
     def height(self):
         return self.state["height"]
+
+    @property
+    def current_round(self):
+        return self.state["round"]
+
+    def advance_round(self):
+        self.state["round"] += 1
+        self._save()
+        return self.state["round"]
 
     def _save(self):
         data = json.dumps(self.state, sort_keys=True, separators=(",", ":")).encode()
@@ -75,6 +89,8 @@ class ConsensusSigner:
     def lock_from_prevotes(self, votes, round_number, block_hash):
         if not isinstance(round_number, int) or isinstance(round_number, bool) or round_number < 0:
             raise ValueError("round_number must be a non-negative integer")
+        if round_number != self.current_round:
+            raise ValueError("prevote quorum is not for the current persisted round")
         seen, power = set(), 0
         records = [{"public_key": k, "voting_power": v} for k, v in self.validators.items()]
         for vote in votes:
@@ -99,6 +115,8 @@ class ConsensusSigner:
         self._save()
 
     def sign_vote(self, round_number, step, block_hash):
+        if round_number != self.current_round:
+            raise ValueError("refusing to sign outside the current persisted round")
         if step not in ("prevote", "precommit"):
             raise ValueError("invalid vote step")
         if self.state["lock"] not in (None, block_hash):
@@ -144,18 +162,22 @@ class ConsensusSigner:
                 if signed_height == height and entry.get("block_hash") != block_hash:
                     raise ValueError("finalized history conflicts with a locally signed vote")
             self.state["height"] = height + 1
+            self.state["round"] = 0
             self.state["lock"] = None
             self.state["locked_round"] = None
             self._save()
 
     def finalize(self, votes, round_number, block_hash):
         records = [{"public_key": k, "voting_power": v} for k, v in self.validators.items()]
+        if round_number != self.current_round:
+            raise ValueError("commit certificate is not for the current persisted round")
         if not verify_commit_certificate(votes, records, self.chain_id,
                                          self.height, round_number, block_hash):
             raise ValueError("invalid commit certificate")
         if self.state["lock"] not in (None, block_hash):
             raise ValueError("finalized block conflicts with the persisted lock")
         self.state["height"] += 1
+        self.state["round"] = 0
         self.state["lock"] = None
         self.state["locked_round"] = None
         self._save()
