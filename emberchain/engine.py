@@ -12,6 +12,8 @@ from consensus import (
     normalize_validator_set,
     verify_proposal,
     verify_vote,
+    verify_round_change,
+    verify_round_change_certificate,
 )
 from signer import ConsensusSigner
 
@@ -44,6 +46,7 @@ class ConsensusEngine:
         self.round = signer.current_round
         self.proposals = {}
         self.votes = defaultdict(dict)
+        self.round_changes = defaultdict(dict)
         self.finalized = {}
 
     @property
@@ -150,6 +153,7 @@ class ConsensusEngine:
             self.round = 0
             self.proposals.clear()
             self.votes.clear()
+            self.round_changes.clear()
             return result
         return None
 
@@ -162,16 +166,57 @@ class ConsensusEngine:
         self.round = self.signer.current_round
         self.proposals.clear()
         self.votes.clear()
+        self.round_changes.clear()
         return True
 
     @_synchronized
-    def advance_round(self):
-        """Advance only while unlocked; locked-round unlock rules are not yet safe."""
-        if self.signer.locked_block_hash is not None:
-            raise RuntimeError(
-                "round advancement halted: safe locked-round unlock rules are not implemented"
-            )
-        self.round = self.signer.advance_round()
+    def request_round_change(self, target_round):
+        """Sign and return a persisted local request for a later round."""
+        message = self.signer.sign_round_change(target_round)
+        self.round_changes[target_round][message["validator"]] = message
+        return message
+
+    @_synchronized
+    def receive_round_change(self, message):
+        """Collect authenticated round-change messages; advance on >2/3 power.
+
+        A certificate only advances validators that have no lock. A locked
+        validator remains halted and retains its lock; this protocol does not
+        claim to implement Tendermint-style locked-round recovery.
+        """
+        if not verify_round_change(message, self.validators, self.chain_id):
+            return None
+        if message["height"] != self.height or message["round"] <= self.round:
+            return None
+        target = message["round"]
+        prior = self.round_changes[target].get(message["validator"])
+        if prior is not None:
+            return None
+        self.round_changes[target][message["validator"]] = message
+        certificate = list(self.round_changes[target].values())
+        if not verify_round_change_certificate(
+            certificate, self.validators, self.chain_id, self.height, target
+        ):
+            return None
+        try:
+            self.round = self.signer.advance_round(certificate)
+        except (ValueError, RuntimeError):
+            return None
+        self.proposals.clear()
+        self.votes.clear()
+        self.round_changes = defaultdict(dict, {
+            round_number: entries for round_number, entries in self.round_changes.items()
+            if round_number > self.round
+        })
+        return {"round": self.round, "certificate": certificate}
+
+    @_synchronized
+    def advance_round(self, certificate=None):
+        """Advance only from a valid distributed certificate; never unlock locally."""
+        if certificate is None:
+            raise RuntimeError("a >2/3 signed round-change certificate is required")
+        target = certificate[0].get("round") if certificate and isinstance(certificate[0], dict) else None
+        self.round = self.signer.advance_round(certificate)
         self.proposals.clear()
         self.votes.clear()
         return self.round
