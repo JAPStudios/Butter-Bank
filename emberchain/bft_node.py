@@ -2,6 +2,7 @@
 """Run a Biscuits account-chain node using stake-free BFT finality."""
 import argparse
 import json
+import math
 import os
 import stat
 import time
@@ -98,9 +99,9 @@ def bft_round_timeout_loop(consensus_server, initial_timeout=10.0,
     rounds. The loop therefore cannot bypass signer anti-equivocation rules.
     """
     if (not isinstance(initial_timeout, (int, float))
-            or isinstance(initial_timeout, bool) or initial_timeout <= 0
+            or isinstance(initial_timeout, bool) or not math.isfinite(initial_timeout) or initial_timeout <= 0
             or not isinstance(maximum_timeout, (int, float))
-            or isinstance(maximum_timeout, bool) or maximum_timeout < initial_timeout):
+            or isinstance(maximum_timeout, bool) or not math.isfinite(maximum_timeout) or maximum_timeout < initial_timeout):
         raise ValueError("invalid BFT round timeout configuration")
     stop_event = stop_event or threading.Event()
     timeout = float(initial_timeout)
