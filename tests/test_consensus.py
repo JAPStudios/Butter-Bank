@@ -1,4 +1,5 @@
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 import json
 import threading
 import urllib.request
@@ -366,6 +367,42 @@ class BFTPrimitiveTests(unittest.TestCase):
             self.assertIsNotNone(engine.retry_pending_finalization())
             self.assertEqual(signer.height, 2)
             self.assertEqual(len(calls), 2)
+
+    def test_concurrent_signing_returns_one_persisted_vote(self):
+        key, _ = self.keys_and_records[0]
+        with tempfile.TemporaryDirectory() as directory:
+            signer = ConsensusSigner(key, self.chain_id, self.validators,
+                                     Path(directory) / "state.json")
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                votes = list(executor.map(
+                    lambda _: signer.sign_vote(0, "prevote", self.block_hash),
+                    range(32)
+                ))
+            self.assertTrue(all(vote == votes[0] for vote in votes))
+            reopened = ConsensusSigner(key, self.chain_id, self.validators,
+                                       Path(directory) / "state.json")
+            self.assertEqual(reopened.sign_vote(0, "prevote", self.block_hash), votes[0])
+
+    def test_concurrent_duplicate_network_votes_count_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            signer = ConsensusSigner(
+                self.keys_and_records[0][0], self.chain_id, self.validators,
+                Path(directory) / "state.json"
+            )
+            engine = ConsensusEngine(signer, lambda block: block.get("hash"))
+            proposer_key = next(
+                key for key, record in self.keys_and_records
+                if record["public_key"] == select_proposer(self.validators, 1, 0)
+            )
+            block = {"hash": self.block_hash}
+            proposal = make_proposal(proposer_key, self.chain_id, 1, 0,
+                                     self.block_hash, self.set_hash)
+            self.assertTrue(engine.receive_proposal(proposal, block))
+            vote = make_vote(self.keys_and_records[1][0], self.chain_id, 1, 0,
+                             "prevote", self.block_hash, self.set_hash)
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                list(executor.map(lambda _: engine.receive_vote(vote), range(32)))
+            self.assertEqual(len(engine.votes[(0, "prevote")]), 1)
 
 
 if __name__ == "__main__":
