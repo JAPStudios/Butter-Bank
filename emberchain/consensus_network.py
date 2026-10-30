@@ -102,30 +102,30 @@ class ConsensusHTTPServer:
                     raise ValueError("message must be a JSON object")
                 return value
 
-        def rate_allowed(self):
-            address = self.client_address[0]
-            now = time.monotonic()
-            with outer.request_lock:
-                history = outer.request_history.get(address)
-                if history is None:
-                    if len(outer.request_history) >= 10_000:
-                        expired = [
-                            ip for ip, events in outer.request_history.items()
-                            if not events or now - events[-1] > 60
-                        ]
-                        for ip in expired:
-                            outer.request_history.pop(ip, None)
+            def rate_allowed(self):
+                address = self.client_address[0]
+                now = time.monotonic()
+                with outer.request_lock:
+                    history = outer.request_history.get(address)
+                    if history is None:
                         if len(outer.request_history) >= 10_000:
-                            return False
-                    history = deque()
-                    outer.request_history[address] = history
-                while history and now - history[0] > 60:
-                    history.popleft()
-                if len(history) >= 600:
-                    return False
-                history.append(now)
-                return True
-
+                            expired = [
+                                ip for ip, events in outer.request_history.items()
+                                if not events or now - events[-1] > 60
+                            ]
+                            for ip in expired:
+                                outer.request_history.pop(ip, None)
+                            if len(outer.request_history) >= 10_000:
+                                return False
+                        history = deque()
+                        outer.request_history[address] = history
+                    while history and now - history[0] > 60:
+                        history.popleft()
+                    if len(history) >= 600:
+                        return False
+                    history.append(now)
+                    return True
+    
             def do_POST(self):
                 if not self.rate_allowed():
                     self.send_json(429, {"ok": False, "error": "consensus request rate limit exceeded"})
