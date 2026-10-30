@@ -41,16 +41,22 @@ class Chain:
         alloc=cfg.get('genesis_allocations',{})
         if not isinstance(alloc,dict) or any(not ishex(a,32) or not isinstance(v,int) or isinstance(v,bool) or v<0 for a,v in alloc.items()): raise ValueError('invalid genesis allocations')
         self.cfg,self.path=cfg,Path(path); self.id=cfg['chain_id']; self.diff=cfg['difficulty']; self.reward=cfg['block_reward']; self.lock=threading.RLock()
+        configured_peers=cfg.get('peers',[])
+        if not isinstance(configured_peers,list) or any(not isinstance(p,str) for p in configured_peers): raise ValueError('peers must be a list of URLs')
+        self.peers=list(dict.fromkeys(p.rstrip('/') for p in configured_peers if p.strip()))
         if self.path.exists():
             d=json.loads(self.path.read_text())
             if not isinstance(d,dict) or d.get('chain_id')!=self.id: raise ValueError('data file belongs to a different chain or has an invalid format')
             self.blocks,self.pool=d.get('chain'),d.get('mempool',[])
+            stored_peers=d.get('peers',[])
+            if not isinstance(stored_peers,list) or any(not isinstance(p,str) for p in stored_peers): raise ValueError('stored peer list is invalid')
+            self.peers=list(dict.fromkeys([p.rstrip('/') for p in stored_peers if p.strip()]+self.peers))
             if not isinstance(self.pool,list) or not self.valid_chain(self.blocks): raise ValueError('stored chain or mempool is invalid')
             self._revalidate_pool()
         else:
             self.blocks=[self.genesis_block()]; self.pool=[]; self.save()
     def save(self):
-        tmp=self.path.with_suffix('.tmp'); tmp.write_text(json.dumps({'chain_id':self.id,'chain':self.blocks,'mempool':self.pool},indent=2)); tmp.replace(self.path)
+        tmp=self.path.with_suffix('.tmp'); tmp.write_text(json.dumps({'chain_id':self.id,'chain':self.blocks,'mempool':self.pool,'peers':self.peers},indent=2)); tmp.replace(self.path)
     def state(self,blocks=None):
         bs=self.blocks if blocks is None else blocks
         bal=dict(bs[0]['transactions'][0]['allocations'])
@@ -221,7 +227,10 @@ class API(BaseHTTPRequestHandler):
                     self.sendj(400,{'error':'peer supplied an invalid chain'});return
                 if len(remote_chain)>len(self.chain.blocks):
                     self.chain.replace(remote_chain)
-                if peer not in self.peers:self.peers.append(peer)
+                if peer not in self.peers:
+                    with self.chain.lock:
+                        self.peers.append(peer)
+                        self.chain.save()
                 self.sendj(200,{'ok':True,'peer':peer,'status':status})
             else:self.sendj(404,{'error':'not found'})
         except Exception as e:self.sendj(400,{'error':str(e)})
@@ -231,7 +240,7 @@ def main():
     cp=Path(a.config)
     if not cp.exists():raise SystemExit('Config missing. Copy config.example.json to config.json and configure it.')
     cfg=json.loads(cp.read_text()); c=Chain(cfg,a.data or f"data-{cfg.get('port',8333)}.json")
-    API.chain=c;API.peers=[x.rstrip('/') for x in cfg.get('peers',[])]
+    API.chain=c;API.peers=c.peers
     srv=ThreadingHTTPServer((cfg.get('host','127.0.0.1'),int(cfg.get('port',8333))),API)
     print(f"Emberchain node on {cfg.get('host')}:{cfg.get('port')} | chain={c.id} | height={len(c.blocks)-1}")
     try:srv.serve_forever()
