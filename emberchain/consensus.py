@@ -144,8 +144,12 @@ def verify_proposal(
         proposer = proposal["proposer"]
         if proposer not in normalized or proposal["chain_id"] != expected_chain_id:
             return False
+        if not _is_hex(proposer, 32):
+            return False
         expected_set_hash = validator_set_hash(validators)
         if proposal["validator_set_hash"] != expected_set_hash:
+            return False
+        if proposer != select_proposer(validators, proposal["height"], proposal["round"]):
             return False
         message = proposal_signing_bytes(
             expected_chain_id, proposal["height"], proposal["round"],
