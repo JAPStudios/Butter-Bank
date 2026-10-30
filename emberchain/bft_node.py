@@ -88,6 +88,11 @@ def main():
     if not config_path.exists():
         raise SystemExit("Config missing. Supply a BFT configuration JSON file.")
     cfg = json.loads(config_path.read_text(encoding="utf-8"))
+    api_host = cfg.get("host", "127.0.0.1")
+    if api_host not in ("127.0.0.1", "localhost", "::1"):
+        raise SystemExit(
+            "The node API is loopback-only; expose it through an authenticated TLS reverse proxy."
+        )
     chain = BFTChain(cfg, args.data or f"data-{cfg.get('port', 8333)}.json")
     key = load_validator_key(cfg["validator_private_key_file"])
     signer = ConsensusSigner(
@@ -124,12 +129,6 @@ def main():
 
     threading.Thread(target=consensus_server.serve_forever, daemon=True).start()
     threading.Thread(target=bft_peer_sync_loop, args=(chain, signer), daemon=True).start()
-    api_host = cfg.get("host", "127.0.0.1")
-    if api_host not in ("127.0.0.1", "localhost", "::1"):
-        consensus_server.shutdown()
-        raise SystemExit(
-            "The node API is loopback-only; expose it through an authenticated TLS reverse proxy."
-        )
     http_server = ThreadingHTTPServer(
         (api_host, int(cfg.get("port", 8333))), BFTAPI
     )
