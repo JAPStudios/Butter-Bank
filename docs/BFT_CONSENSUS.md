@@ -37,14 +37,20 @@ The four-node test is a deterministic integration test, not a substitute for for
 
    `PYTHONPATH=emberchain python -m keygen --output validator.key`
 
-2. Have the configured issuer federation sign an admission certificate for the printed public key. Configure the issuer public keys, certificate signatures, and current admission epoch in a copy of config.bft.example.json. The example intentionally contains placeholders and is not a runnable network configuration.
+2. Each issuer independently signs the validator key. Put the federation's public keys in a JSON array file and run the issuer tool once per issuer:
 
-3. For a remote consensus listener, configure a TLS certificate and key, bind consensus_host to the public interface, and use HTTPS URLs in consensus_peers. A non-loopback listener without TLS is rejected. Keep validator.key and the signer state file backed up securely; never commit either file.
+   `PYTHONPATH=emberchain python -m admission_signer --issuer-key issuer.key --issuer-set issuers.json --chain-id biscuits-bft-development --validator-public-key PUBLIC_KEY --issued-epoch 1 --expires-epoch 100`
 
-4. Start the BFT node:
+   Collect more than two-thirds of the issuer signatures into that validator's admission certificate. Do not share issuer private keys or let the node operator make eligibility decisions for issuers.
+
+3. Configure issuer public keys, certificate signatures, and the current admission epoch in a copy of config.bft.example.json. The example intentionally contains placeholders and is not a runnable network configuration.
+
+4. For a remote consensus listener, configure a TLS certificate and key, bind consensus_host to the public interface, and use HTTPS URLs in consensus_peers. A non-loopback listener without TLS is rejected. Keep validator.key and the signer state file backed up securely; never commit either file.
+
+5. Start the BFT node:
 
    `PYTHONPATH=emberchain python emberchain/bft_node.py --config config.bft.json`
 
-5. The selected proposer can request a proposal through the local node API using POST /propose with an empty JSON object. Validators automatically prevote only after local block validation. Finality requires more than two-thirds of the admitted voting power.
+6. The selected proposer can request a proposal through the local node API using POST /propose with an empty JSON object. Validators automatically prevote only after local block validation. Finality requires more than two-thirds of the admitted voting power.
 
-This run mode is a development prototype. It currently has no safe unlock/round-timeout protocol, no automatic validator-set transition or revocation activation, and no automatic recovery from a crash between signer finalization and chain-file persistence. A signer-height mismatch causes startup to fail closed. Do not use real funds or deploy a public mainnet with this version.
+This run mode is a development prototype. It still has no safe unlock/round-timeout protocol or automatic validator-set transition and revocation activation. The node writes the finalized block before advancing signer height; offline signers can catch up by verifying committed certificates. Disk rollback protection still requires trusted monotonic storage or equivalent operational controls. Do not use real funds or deploy a public mainnet with this version.
