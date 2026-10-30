@@ -15,7 +15,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
-from consensus import canonical_json, verify_vote
+from consensus import canonical_json, verify_vote, verify_round_change
 from engine import ConsensusEngine
 
 
@@ -152,6 +152,24 @@ class ConsensusHTTPServer:
                             pass
                         self.send_json(200, {"ok": True})
                         return
+                    if path == "/consensus/round-change":
+                        round_change = message.get("round_change")
+                        if (not isinstance(round_change, dict)
+                                or not verify_round_change(
+                                    round_change, outer.engine.validators, outer.engine.chain_id
+                                )
+                                or round_change["height"] != outer.engine.height
+                                or round_change["round"] <= outer.engine.round):
+                            self.send_json(400, {"ok": False, "error": "invalid or stale round-change message"})
+                            return
+                        digest = outer._remember("round-change", message)
+                        if not digest:
+                            self.send_json(200, {"ok": True, "duplicate": True})
+                            return
+                        outer.engine.receive_round_change(round_change)
+                        outer._broadcast("/consensus/round-change", message)
+                        self.send_json(200, {"ok": True, "round": outer.engine.round})
+                        return
                     if path == "/consensus/vote":
                         vote = message.get("vote")
                         if not isinstance(vote, dict):
@@ -221,6 +239,15 @@ class ConsensusHTTPServer:
         except ValueError:
             pass
         return True
+
+    def publish_round_change(self, target_round):
+        """Sign, persist, locally process, and relay a round-change request."""
+        message = self.engine.request_round_change(target_round)
+        envelope = {"round_change": message}
+        if self._remember("round-change", envelope):
+            self.engine.receive_round_change(message)
+            self._broadcast("/consensus/round-change", envelope)
+        return message
 
     def publish_vote(self, vote):
         """Record and relay a locally signed vote."""
