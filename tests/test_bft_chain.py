@@ -236,6 +236,35 @@ class BFTChainTests(unittest.TestCase):
             self.assertEqual(len(chain.blocks), 1)
             chain.save = original_save
 
+    def test_bft_finality_rejects_longer_conflicting_fork(self):
+        with tempfile.TemporaryDirectory() as directory:
+            left = BFTChain(self.cfg, Path(directory) / "left.json")
+            right = BFTChain(self.cfg, Path(directory) / "right.json")
+            set_hash = validator_set_hash(left.validators)
+            keys_by_public = {
+                key.public_key().public_bytes_raw().hex(): key
+                for key in self.validator_keys
+            }
+
+            def commit_next(chain, proposer):
+                block = chain.build_proposal(proposer)
+                votes = [
+                    make_vote(keys_by_public[item["public_key"]], self.chain_id,
+                              block["height"], 0, "precommit", block["hash"], set_hash)
+                    for item in chain.validators[:3]
+                ]
+                self.assertTrue(chain.accept_finalized_block(block, 0, votes)[0])
+                return block
+
+            left_first = commit_next(left, left.validators[0]["public_key"])
+            right_first = commit_next(right, right.validators[1]["public_key"])
+            self.assertNotEqual(left_first["hash"], right_first["hash"])
+            commit_next(right, right.validators[2]["public_key"])
+            self.assertEqual(len(right.blocks), 3)
+            ok, message = left.replace(right.blocks)
+            self.assertFalse(ok)
+            self.assertIn("conflicts with locally finalized history", message)
+
 
 if __name__ == "__main__":
     unittest.main()
