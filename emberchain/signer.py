@@ -94,11 +94,18 @@ class ConsensusSigner:
 
     @property
     def height(self):
-        return self.state["height"]
+        with self._lock:
+            return self.state["height"]
 
     @property
     def current_round(self):
-        return self.state["round"]
+        with self._lock:
+            return self.state["round"]
+
+    @property
+    def locked_block_hash(self):
+        with self._lock:
+            return self.state["lock"]
 
     @_synchronized
     def advance_round(self):
