@@ -312,6 +312,11 @@ class BFTChainTests(unittest.TestCase):
                 api_server.server_close()
                 thread.join(timeout=2)
                 consensus_server.server.server_close()
+                signer.close()
+                BFTAPI.consensus_server = None
+                BFTAPI.consensus_key = None
+                BFTAPI.chain = None
+                BFTAPI.peers = []
 
     def test_three_of_four_online_validators_reach_quorum(self):
         with tempfile.TemporaryDirectory() as directory:
