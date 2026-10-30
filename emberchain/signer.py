@@ -202,6 +202,10 @@ class ConsensusSigner:
             raise ValueError("target_round must be greater than the current round")
         if self.state["lock"] is not None:
             raise RuntimeError("locked validator cannot request an unlocked round change")
+        for signed_slot in self.state["signed"]:
+            parts = signed_slot.split(":")
+            if len(parts) == 3 and parts[0] == str(self.height):
+                raise RuntimeError("validator with a signed vote cannot request a round change at this height")
         slot = str(target_round)
         prior = self.state["signed_round_changes"].get(slot)
         if prior is not None:
@@ -296,6 +300,11 @@ class ConsensusSigner:
             raise ValueError("refusing to sign outside the current persisted round")
         if step not in ("prevote", "precommit"):
             raise ValueError("invalid vote step")
+        if any(
+            int(target) > round_number
+            for target in self.state.get("signed_round_changes", {})
+        ):
+            raise ValueError("refusing to vote after requesting a later round")
         if self.state["lock"] not in (None, block_hash):
             raise ValueError("vote conflicts with persisted lock")
         if step == "precommit" and self.state["lock"] != block_hash:
