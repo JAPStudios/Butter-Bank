@@ -39,6 +39,12 @@ class BFTPrimitiveTests(unittest.TestCase):
         duplicate = [self.validators[0], self.validators[0]]
         with self.assertRaises(ValueError):
             validator_set_hash(duplicate)
+        case_duplicate = [
+            {"public_key": self.validators[0]["public_key"].lower(), "voting_power": 1},
+            {"public_key": self.validators[0]["public_key"].upper(), "voting_power": 1},
+        ]
+        with self.assertRaises(ValueError):
+            validator_set_hash(case_duplicate)
         invalid = [{"public_key": self.validators[0]["public_key"], "voting_power": 0}]
         with self.assertRaises(ValueError):
             validator_set_hash(invalid)
