@@ -112,10 +112,7 @@ def bft_round_timeout_loop(consensus_server, initial_timeout=10.0,
             observed = current
             timeout = float(initial_timeout)
             continue
-        pending = [
-            int(target) for target in engine.signer.state.get("signed_round_changes", {})
-            if int(target) > engine.round
-        ]
+        pending = engine.signer.pending_round_change_targets
         target_round = min(pending) if pending else engine.round + 1
         try:
             consensus_server.publish_round_change(target_round)
