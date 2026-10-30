@@ -273,6 +273,10 @@ class API(BaseHTTPRequestHandler):
                     self.sendj(400,{'error':'peer must be a base HTTP(S) URL without credentials, path, query, or fragment'});return
                 try: parsed.port
                 except ValueError: self.sendj(400,{'error':'peer URL has an invalid port'});return
+                if (getattr(self.chain,'consensus_mode','pow')=='bft'
+                        and parsed.scheme!='https'
+                        and parsed.hostname not in ('127.0.0.1','localhost','::1')):
+                    self.sendj(400,{'error':'remote BFT chain peers must use HTTPS'});return
                 peer=raw_peer.rstrip('/')
                 status=get(peer+'/status')
                 expected={'chain_id':self.chain.id,'genesis_hash':self.chain.blocks[0]['hash'],'difficulty':self.chain.diff,'block_reward':self.chain.reward,'consensus':getattr(self.chain,'consensus_mode','pow')}
