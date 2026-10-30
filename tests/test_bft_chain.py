@@ -12,6 +12,8 @@ from consensus import make_proposal, select_proposer
 from consensus_network import ConsensusHTTPServer
 from engine import ConsensusEngine
 from signer import ConsensusSigner
+from bft_node import load_validator_key
+from keygen import generate_keypair
 from consensus import make_vote, validator_set_hash
 
 
@@ -197,6 +199,13 @@ class BFTChainTests(unittest.TestCase):
             self.assertTrue(chain.accept_finalized_block(block, 0, votes)[0])
             with self.assertRaises(ValueError):
                 signer.catch_up(chain.blocks[1:])
+
+    def test_bft_node_loads_owner_only_validator_key(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "validator.key"
+            expected_public = generate_keypair(path)
+            loaded = load_validator_key(path)
+            self.assertEqual(loaded.public_key().public_bytes_raw().hex(), expected_public)
 
 
 if __name__ == "__main__":
