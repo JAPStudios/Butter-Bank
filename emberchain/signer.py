@@ -11,6 +11,8 @@ class ConsensusSigner:
     """Persist each signed vote before returning it; never unlock within a height."""
 
     def __init__(self, private_key, chain_id, validators, state_path, initial_height=1):
+        if not isinstance(initial_height, int) or isinstance(initial_height, bool) or initial_height < 1:
+            raise ValueError("initial_height must be a positive integer")
         self.key = private_key
         self.public_key = private_key.public_key().public_bytes_raw().hex()
         self.chain_id = chain_id
@@ -22,14 +24,23 @@ class ConsensusSigner:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if self.path.exists():
             self.state = json.loads(self.path.read_text())
-            if (self.state.get("chain_id") != chain_id
+            if (not isinstance(self.state, dict)
+                    or self.state.get("chain_id") != chain_id
                     or self.state.get("validator_set_hash") != self.validators_hash
                     or self.state.get("public_key") != self.public_key):
                 raise ValueError("persisted state belongs to another validator or chain")
+            height = self.state.get("height")
+            if not isinstance(height, int) or isinstance(height, bool) or height < initial_height:
+                raise ValueError("invalid persisted consensus height")
+            if not isinstance(self.state.get("signed"), dict):
+                raise ValueError("invalid persisted signing history")
+            lock = self.state.get("lock")
+            if lock is not None and (not isinstance(lock, str) or len(lock) != 64):
+                raise ValueError("invalid persisted lock")
         else:
             self.state = {"chain_id": chain_id, "validator_set_hash": self.validators_hash,
                           "public_key": self.public_key, "height": initial_height,
-                          "lock": None, "signed": {}}
+                          "lock": None, "locked_round": None, "signed": {}}
             self._save()
 
     @property
@@ -46,6 +57,14 @@ class ConsensusSigner:
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(name, self.path)
+            try:
+                directory_fd = os.open(self.path.parent, os.O_RDONLY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+            except OSError:
+                pass
         except Exception:
             try:
                 os.unlink(name)
@@ -54,6 +73,8 @@ class ConsensusSigner:
             raise
 
     def lock_from_prevotes(self, votes, round_number, block_hash):
+        if not isinstance(round_number, int) or isinstance(round_number, bool) or round_number < 0:
+            raise ValueError("round_number must be a non-negative integer")
         seen, power = set(), 0
         records = [{"public_key": k, "voting_power": v} for k, v in self.validators.items()]
         for vote in votes:
@@ -70,7 +91,11 @@ class ConsensusSigner:
             raise ValueError("prevote quorum must exceed two-thirds")
         if self.state["lock"] not in (None, block_hash):
             raise ValueError("this signer version never unlocks within a height")
+        locked_round = self.state.get("locked_round")
+        if locked_round is not None and round_number < locked_round:
+            raise ValueError("cannot move a persisted lock to an earlier round")
         self.state["lock"] = block_hash
+        self.state["locked_round"] = round_number
         self._save()
 
     def sign_vote(self, round_number, step, block_hash):
@@ -101,4 +126,5 @@ class ConsensusSigner:
             raise ValueError("finalized block does not match local lock")
         self.state["height"] += 1
         self.state["lock"] = None
+        self.state["locked_round"] = None
         self._save()
