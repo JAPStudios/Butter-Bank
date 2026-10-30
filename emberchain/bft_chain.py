@@ -1,5 +1,8 @@
 """BFT-finalized account chain reusing the existing Biscuits transaction rules."""
 import time
+import json
+import os
+import tempfile
 from node import Chain, bhash, canon, sha, MAX_TXS
 from consensus import verify_commit_certificate, validator_set_hash
 from admission import validator_set_from_certificates
@@ -23,6 +26,40 @@ class BFTChain(Chain):
         # The inherited proof-of-work validator is reused only for transaction
         # execution and structural checks; BFT certificates replace PoW.
         self.diff = 0
+
+    def save(self):
+        """Atomically persist BFT chain state before signer finalization."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps({
+            "chain_id": self.id,
+            "chain": self.blocks,
+            "mempool": self.pool,
+            "peers": self.peers,
+        }, indent=2).encode("utf-8")
+        descriptor, temporary = tempfile.mkstemp(
+            prefix=self.path.name + ".", suffix=".tmp", dir=self.path.parent
+        )
+        try:
+            os.fchmod(descriptor, 0o600)
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, self.path)
+            try:
+                directory_fd = os.open(self.path.parent, os.O_RDONLY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+            except OSError:
+                pass
+        except Exception:
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+            raise
 
     def valid_chain(self, blocks, require_certificates=True):
         try:
