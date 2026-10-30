@@ -3,6 +3,7 @@ import time
 import json
 import os
 import tempfile
+from urllib.parse import urlparse
 from node import Chain, bhash, canon, sha, MAX_TXS
 from consensus import verify_commit_certificate, validator_set_hash
 from admission import validator_set_from_certificates
@@ -25,6 +26,18 @@ class BFTChain(Chain):
         self.validators_hash = validator_set_hash(self.validators)
         self.consensus_mode = "bft"
         super().__init__(cfg, path)
+        for peer in self.peers:
+            parsed = urlparse(peer)
+            if (parsed.scheme not in ("http", "https") or not parsed.hostname
+                    or parsed.username or parsed.password or parsed.path not in ("", "/")
+                    or parsed.query or parsed.fragment):
+                raise ValueError("invalid BFT chain peer URL")
+            try:
+                parsed.port
+            except ValueError:
+                raise ValueError("BFT chain peer URL has an invalid port")
+            if parsed.scheme != "https" and parsed.hostname not in ("127.0.0.1", "localhost", "::1"):
+                raise ValueError("remote BFT chain peers must use HTTPS")
         # The inherited proof-of-work validator is reused only for transaction
         # execution and structural checks; BFT certificates replace PoW.
         self.diff = 0
