@@ -265,6 +265,12 @@ class BFTChainTests(unittest.TestCase):
             self.assertFalse(ok)
             self.assertIn("conflicts with locally finalized history", message)
 
+    def test_bft_chain_rejects_remote_plain_http_peers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cfg = dict(self.cfg, peers=["http://example.com:8333"])
+            with self.assertRaises(ValueError):
+                BFTChain(cfg, Path(directory) / "chain.json")
+
 
 if __name__ == "__main__":
     unittest.main()
