@@ -15,6 +15,7 @@ from consensus import (
     make_round_change,
     select_proposer,
     validator_set_hash,
+    MAX_ROUND,
     verify_commit_certificate,
     verify_proposal,
     verify_vote,
@@ -709,3 +710,58 @@ class BFTRoundTimeoutLoopTests(unittest.TestCase):
         bft_round_timeout_loop(server, stop_event=stop)
 
         self.assertEqual(server.targets, [])
+
+
+class BFTRoundBoundsTests(unittest.TestCase):
+    def setUp(self):
+        self.keys_and_records = [validator() for _ in range(4)]
+        self.validators = [record for _, record in self.keys_and_records]
+        self.chain_id = "biscuits-round-bound-test"
+        self.block_hash = "ab" * 32
+        self.set_hash = validator_set_hash(self.validators)
+
+    def test_consensus_primitives_reject_rounds_above_32_bit_limit(self):
+        key = self.keys_and_records[0][0]
+        with self.assertRaises(ValueError):
+            select_proposer(self.validators, 1, MAX_ROUND + 1)
+        with self.assertRaises(ValueError):
+            make_proposal(
+                key, self.chain_id, 1, MAX_ROUND + 1,
+                self.block_hash, self.set_hash
+            )
+        with self.assertRaises(ValueError):
+            make_vote(
+                key, self.chain_id, 1, MAX_ROUND + 1,
+                "prevote", self.block_hash, self.set_hash
+            )
+        with self.assertRaises(ValueError):
+            make_round_change(
+                key, self.chain_id, 1, MAX_ROUND + 1, self.set_hash
+            )
+
+    def test_signer_refuses_round_change_above_32_bit_limit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            signer = ConsensusSigner(
+                self.keys_and_records[0][0], self.chain_id, self.validators,
+                Path(directory) / "signer.json"
+            )
+            with self.assertRaises(ValueError):
+                signer.sign_round_change(MAX_ROUND + 1)
+            signer.close()
+
+    def test_signer_rejects_persisted_round_above_32_bit_limit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "signer.json"
+            signer = ConsensusSigner(
+                self.keys_and_records[0][0], self.chain_id, self.validators, path
+            )
+            signer.close()
+            state = json.loads(path.read_text())
+            state["round"] = MAX_ROUND + 1
+            path.write_text(json.dumps(state))
+            path.chmod(0o600)
+            with self.assertRaisesRegex(ValueError, "persisted consensus round"):
+                ConsensusSigner(
+                    self.keys_and_records[0][0], self.chain_id,
+                    self.validators, path
+                )
