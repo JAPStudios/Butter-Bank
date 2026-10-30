@@ -46,7 +46,8 @@ class ConsensusSigner:
         if hasattr(os, "O_NOFOLLOW"):
             lock_flags |= os.O_NOFOLLOW
         self._lock_fd = os.open(self.lock_path, lock_flags, 0o600)
-        os.fchmod(self._lock_fd, 0o600)
+        if hasattr(os, "fchmod"):
+            os.fchmod(self._lock_fd, 0o600)
         try:
             if fcntl is not None:
                 fcntl.flock(self._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -179,7 +180,8 @@ class ConsensusSigner:
         data = json.dumps(self.state, sort_keys=True, separators=(",", ":")).encode()
         fd, name = tempfile.mkstemp(dir=self.path.parent, prefix=self.path.name)
         try:
-            os.fchmod(fd, 0o600)
+            if hasattr(os, "fchmod"):
+                os.fchmod(fd, 0o600)
             with os.fdopen(fd, "wb") as f:
                 f.write(data)
                 f.flush()
