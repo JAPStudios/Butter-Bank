@@ -1,6 +1,11 @@
 import unittest
+import os
+import tempfile
+from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+from keygen import generate_keypair
 
 from admission import (
     admission_signing_bytes,
@@ -61,6 +66,16 @@ class AdmissionCertificateTests(unittest.TestCase):
                 [self.certificate(), self.certificate()],
                 self.issuers, self.chain_id, 15
             )
+
+    def test_keygen_creates_owner_only_key_and_never_overwrites(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "validator.key"
+            public = generate_keypair(path)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            private = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(path.read_text().strip()))
+            self.assertEqual(private.public_key().public_bytes_raw().hex(), public)
+            with self.assertRaises(FileExistsError):
+                generate_keypair(path)
 
 
 if __name__ == "__main__":
