@@ -7,7 +7,7 @@
 - A commit certificate requires unique, valid precommit signatures representing strictly more than two-thirds of voting power.
 - Validator signing intents and locks are written to disk before signed messages are returned. A per-state-file OS process lock prevents two validator processes from using the same signer state simultaneously; existing state files must be regular files with mode 0600 and cannot be symlinks.
 - The event-driven coordinator validates proposed blocks through a caller-supplied block validator, gathers votes, and finalizes only after a valid commit certificate.
-- The HTTP transport relays signed proposals and votes. Non-loopback peers must use HTTPS.
+- The HTTP transport relays signed proposals and votes, caps request bodies at 1 MB, limits concurrent handlers, and rate-limits each source address. Non-loopback peers must use HTTPS.
 - Admission certificates require signatures from strictly more than two-thirds of a configured issuer federation. Admitted validators receive equal voting power; no stake or token balance is used.
 
 ## Safety limits that are deliberate
