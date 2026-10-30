@@ -140,14 +140,18 @@ class ConsensusSigner:
 
     def close(self):
         """Release the exclusive process lock when this validator stops."""
-        if getattr(self, "_lock_fd", None) is not None:
-            if fcntl is not None:
-                fcntl.flock(self._lock_fd, fcntl.LOCK_UN)
-            else:
-                os.lseek(self._lock_fd, 0, os.SEEK_SET)
-                msvcrt.locking(self._lock_fd, msvcrt.LK_UNLCK, 1)
-            os.close(self._lock_fd)
-            self._lock_fd = None
+        lock = getattr(self, "_lock", None)
+        if lock is None:
+            return
+        with lock:
+            if getattr(self, "_lock_fd", None) is not None:
+                if fcntl is not None:
+                    fcntl.flock(self._lock_fd, fcntl.LOCK_UN)
+                else:
+                    os.lseek(self._lock_fd, 0, os.SEEK_SET)
+                    msvcrt.locking(self._lock_fd, msvcrt.LK_UNLCK, 1)
+                os.close(self._lock_fd)
+                self._lock_fd = None
 
     def __del__(self):
         try:
