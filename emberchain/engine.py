@@ -154,12 +154,15 @@ class ConsensusEngine:
         return None
 
     @_synchronized
-    def catch_up(self, finalized_blocks):
-        """Apply already-verified committed history and reset round-local state."""
-        self.signer.catch_up(finalized_blocks)
+    def catch_up_chain(self, chain_blocks):
+        """Catch up from a chain snapshot without racing concurrent finalization."""
+        if self.signer.height >= len(chain_blocks):
+            return False
+        self.signer.catch_up(chain_blocks[self.signer.height:])
         self.round = self.signer.current_round
         self.proposals.clear()
         self.votes.clear()
+        return True
 
     @_synchronized
     def advance_round(self):
