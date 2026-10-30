@@ -204,7 +204,12 @@ class BFTPrimitiveTests(unittest.TestCase):
                                      self.block_hash, self.set_hash)
             self.assertFalse(engine.receive_proposal(proposal, {"hash": "cd" * 32}))
             self.assertEqual(engine.advance_round(), 1)
-            signer.state["lock"] = self.block_hash
+            locked_prevotes = [
+                make_vote(key, self.chain_id, 1, 1, "prevote",
+                          self.block_hash, self.set_hash)
+                for key, _ in self.keys_and_records[:3]
+            ]
+            signer.lock_from_prevotes(locked_prevotes, 1, self.block_hash)
             with self.assertRaises(RuntimeError):
                 engine.advance_round()
 
