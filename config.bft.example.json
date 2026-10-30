@@ -6,7 +6,10 @@
   "genesis_allocations": {},
   "admission_epoch": 1,
   "admission_issuers": [
-    "REPLACE_WITH_64_HEX_CHARACTER_ISSUER_PUBLIC_KEY"
+    "REPLACE_WITH_ISSUER_1_PUBLIC_KEY_HEX",
+    "REPLACE_WITH_ISSUER_2_PUBLIC_KEY_HEX",
+    "REPLACE_WITH_ISSUER_3_PUBLIC_KEY_HEX",
+    "REPLACE_WITH_ISSUER_4_PUBLIC_KEY_HEX"
   ],
   "admission_certificates": [],
   "validator_private_key_file": "validator.key",
