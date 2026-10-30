@@ -1,6 +1,6 @@
 """BFT-finalized account chain reusing the existing Biscuits transaction rules."""
 from node import Chain, bhash, canon, sha
-from consensus import verify_commit_certificate
+from consensus import verify_commit_certificate, validator_set_hash
 from admission import validator_set_from_certificates
 
 
@@ -16,6 +16,7 @@ class BFTChain(Chain):
             cfg.get("chain_id", ""),
             cfg.get("admission_epoch"),
         )
+        self.validators_hash = validator_set_hash(self.validators)
         self.consensus_mode = "bft"
         super().__init__(cfg, path)
         # The inherited proof-of-work validator is reused only for transaction
