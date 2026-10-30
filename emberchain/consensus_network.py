@@ -114,6 +114,35 @@ class ConsensusHTTPServer:
 
         self.server = ThreadingHTTPServer((host, port), Handler)
 
+    def publish_proposal(self, proposal, block):
+        """Validate a locally-created proposal and relay it to configured peers."""
+        if not self.engine.receive_proposal(proposal, block):
+            raise ValueError("local proposal failed consensus validation")
+        message = {"proposal": proposal, "block": block}
+        if self._remember("proposal", message):
+            self._broadcast("/consensus/proposal", message)
+        return True
+
+    def publish_vote(self, vote):
+        """Record and relay a locally signed vote."""
+        if (not verify_vote(vote, self.engine.validators, self.engine.chain_id)
+                or vote["height"] != self.engine.height
+                or vote["round"] != self.engine.round):
+            raise ValueError("local vote is invalid or out of round")
+        message = {"vote": vote}
+        if not self._remember("vote", message):
+            return False
+        action = self.engine.receive_vote(vote)
+        if isinstance(action, dict) and "signature" in action:
+            finalized = self.engine.receive_vote(action)
+            self._broadcast("/consensus/vote", {"vote": action})
+            if finalized is not None:
+                self._finalize(finalized)
+        elif action is not None:
+            self._finalize(action)
+        self._broadcast("/consensus/vote", message)
+        return True
+
     def _remember(self, kind, message):
         digest = hashlib.sha256(kind.encode() + b":" + canonical_json(message)).hexdigest()
         with self.seen_lock:
