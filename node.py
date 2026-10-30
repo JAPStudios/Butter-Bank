@@ -34,16 +34,20 @@ class Chain:
         g['hash']=bhash(g)
         return g
     def __init__(self,cfg,path):
-        self.cfg,self.path=cfg,Path(path); self.id=cfg['chain_id']; self.diff=int(cfg['difficulty']); self.reward=int(cfg['block_reward']); self.lock=threading.RLock()
-        if not 1<=self.diff<=6: raise ValueError('difficulty must be 1..6 for this prototype')
+        if not isinstance(cfg,dict): raise ValueError('configuration must be a JSON object')
+        if not isinstance(cfg.get('chain_id'),str) or not cfg['chain_id'].strip(): raise ValueError('chain_id must be a non-empty string')
+        if not isinstance(cfg.get('difficulty'),int) or isinstance(cfg.get('difficulty'),bool) or not 1<=cfg['difficulty']<=6: raise ValueError('difficulty must be an integer from 1..6')
+        if not isinstance(cfg.get('block_reward'),int) or isinstance(cfg.get('block_reward'),bool) or cfg['block_reward']<0: raise ValueError('block_reward must be a non-negative integer')
+        alloc=cfg.get('genesis_allocations',{})
+        if not isinstance(alloc,dict) or any(not ishex(a,32) or not isinstance(v,int) or isinstance(v,bool) or v<0 for a,v in alloc.items()): raise ValueError('invalid genesis allocations')
+        self.cfg,self.path=cfg,Path(path); self.id=cfg['chain_id']; self.diff=cfg['difficulty']; self.reward=cfg['block_reward']; self.lock=threading.RLock()
         if self.path.exists():
             d=json.loads(self.path.read_text())
-            if d['chain_id']!=self.id: raise ValueError('data file belongs to a different chain')
-            self.blocks,self.pool=d['chain'],d.get('mempool',[])
-            if not self.valid_chain(self.blocks): raise ValueError('stored chain is invalid')
+            if not isinstance(d,dict) or d.get('chain_id')!=self.id: raise ValueError('data file belongs to a different chain or has an invalid format')
+            self.blocks,self.pool=d.get('chain'),d.get('mempool',[])
+            if not isinstance(self.pool,list) or not self.valid_chain(self.blocks): raise ValueError('stored chain or mempool is invalid')
+            self._revalidate_pool()
         else:
-            alloc=cfg.get('genesis_allocations',{})
-            if any(not ishex(a,32) or not isinstance(v,int) or isinstance(v,bool) or v<0 for a,v in alloc.items()): raise ValueError('invalid genesis allocations')
             self.blocks=[self.genesis_block()]; self.pool=[]; self.save()
     def save(self):
         tmp=self.path.with_suffix('.tmp'); tmp.write_text(json.dumps({'chain_id':self.id,'chain':self.blocks,'mempool':self.pool},indent=2)); tmp.replace(self.path)
@@ -71,16 +75,23 @@ class Chain:
         return True,'ok'
     def valid_chain(self,bs):
         try:
-            if not bs or bs[0] != self.genesis_block(): return False
+            if not isinstance(bs,list) or not bs or bs[0] != self.genesis_block(): return False
             bal=dict(bs[0]['transactions'][0]['allocations']); nonces={a:0 for a in bal}
             for i,b in enumerate(bs[1:],1):
+                if not isinstance(b,dict) or set(b)!={'height','previous_hash','timestamp','transactions','nonce','hash'}: return False
+                for field in ('height','timestamp','nonce'):
+                    if not isinstance(b[field],int) or isinstance(b[field],bool) or b[field]<0: return False
                 if b['height']!=i or b['previous_hash']!=bs[i-1]['hash'] or b['timestamp']<bs[i-1]['timestamp'] or b['timestamp']>int(time.time())+120: return False
-                if b['hash']!=bhash(b) or not b['hash'].startswith('0'*self.diff): return False
+                if not ishex(b['hash'],32) or b['hash']!=bhash(b) or not b['hash'].startswith('0'*self.diff): return False
                 txs=b['transactions']
-                if not txs or len(txs)>MAX_TXS+1: return False
+                if not isinstance(txs,list) or not txs or len(txs)>MAX_TXS+1: return False
                 cb=txs[0]
-                if set(cb)!={'type','recipient','amount'} or cb['type']!='coinbase' or not ishex(cb['recipient'],32): return False
-                fees=sum(t['fee'] for t in txs[1:])
+                if not isinstance(cb,dict) or set(cb)!={'type','recipient','amount'} or cb['type']!='coinbase' or not ishex(cb['recipient'],32): return False
+                if not isinstance(cb['amount'],int) or isinstance(cb['amount'],bool) or cb['amount']<0: return False
+                fees=0
+                for tx in txs[1:]:
+                    if not isinstance(tx,dict) or not isinstance(tx.get('fee'),int) or isinstance(tx.get('fee'),bool) or tx['fee']<0: return False
+                    fees+=tx['fee']
                 if cb['amount']!=self.reward+fees: return False
                 bal[cb['recipient']]=bal.get(cb['recipient'],0)+cb['amount']; nonces.setdefault(cb['recipient'],0)
                 for tx in txs[1:]:
@@ -88,7 +99,7 @@ class Chain:
                     if not ok: return False
                     s,r=tx['sender'],tx['recipient']; bal[s]-=tx['amount']+tx['fee']; bal[r]=bal.get(r,0)+tx['amount']; nonces[s]=tx['nonce']; nonces.setdefault(r,0)
             return True
-        except Exception: return False
+        except (KeyError,TypeError,ValueError,OverflowError): return False
     def add_tx(self,tx):
         with self.lock:
             bal,nonces=self.state()
@@ -118,11 +129,21 @@ class Chain:
             candidate=self.blocks+[b]
             if not self.valid_chain(candidate):return False,'invalid block'
             self.blocks=candidate; included={sha(canon(t)) for t in b['transactions'][1:]}; self.pool=[t for t in self.pool if sha(canon(t)) not in included]; self.save(); return True,'accepted'
+    def _revalidate_pool(self):
+        bal,nonces=self.state(); accepted=[]
+        for tx in sorted(self.pool,key=lambda x:(str(x.get('sender','')),x.get('nonce',0) if isinstance(x.get('nonce'),int) else 0)):
+            ok,_=self.check_tx(tx,bal,nonces)
+            if not ok: continue
+            s,r=tx['sender'],tx['recipient']; bal[s]-=tx['amount']+tx['fee']; bal[r]=bal.get(r,0)+tx['amount']; nonces[s]=tx['nonce']; nonces.setdefault(r,0); accepted.append(tx)
+        self.pool=accepted
     def replace(self,bs):
         with self.lock:
-            if len(bs)<=len(self.blocks):return False,'candidate is not longer'
             if not self.valid_chain(bs):return False,'candidate chain invalid'
-            self.blocks=bs; self.pool=[]; self.save(); return True,'replaced'
+            if len(bs)<=len(self.blocks):return False,'candidate has no greater cumulative work'
+            old_pool=list(self.pool); self.blocks=bs; self.pool=old_pool
+            included={sha(canon(t)) for block in bs[1:] for t in block['transactions'][1:]}
+            self.pool=[t for t in self.pool if sha(canon(t)) not in included]
+            self._revalidate_pool(); self.save(); return True,'replaced'
 
 class API(BaseHTTPRequestHandler):
     chain=None; peers=[]
