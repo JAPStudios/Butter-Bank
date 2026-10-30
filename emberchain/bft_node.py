@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import stat
+import time
 import threading
 from pathlib import Path
 from http.server import ThreadingHTTPServer
@@ -16,7 +17,7 @@ from consensus_network import ConsensusHTTPServer
 from engine import ConsensusEngine
 from signer import ConsensusSigner
 from bft_chain import BFTChain
-from node import API, peer_sync_loop
+from node import API, synchronize_peer
 
 
 class BFTAPI(API):
@@ -67,6 +68,17 @@ def load_validator_key(path):
     return Ed25519PrivateKey.from_private_bytes(seed)
 
 
+def bft_peer_sync_loop(chain, signer, interval=10):
+    while True:
+        for peer in list(chain.peers):
+            synchronize_peer(chain, peer)
+        if signer.height < len(chain.blocks):
+            signer.catch_up(chain.blocks[signer.height:])
+        elif signer.height > len(chain.blocks):
+            raise RuntimeError("validator signer is ahead of the locally persisted finalized chain")
+        time.sleep(interval)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="config.json")
@@ -83,6 +95,8 @@ def main():
         cfg.get("validator_state_file", f"data-{cfg.get('port', 8333)}.consensus.json"),
         initial_height=len(chain.blocks),
     )
+    if signer.height < len(chain.blocks):
+        signer.catch_up(chain.blocks[signer.height:])
     if signer.height != len(chain.blocks):
         raise SystemExit("Validator signer height does not match finalized chain height; refusing to sign.")
     engine = ConsensusEngine(signer, chain.validate_proposal_block)
@@ -109,7 +123,7 @@ def main():
     BFTAPI.consensus_key = key
 
     threading.Thread(target=consensus_server.serve_forever, daemon=True).start()
-    threading.Thread(target=peer_sync_loop, args=(chain,), daemon=True).start()
+    threading.Thread(target=bft_peer_sync_loop, args=(chain, signer), daemon=True).start()
     http_server = ThreadingHTTPServer(
         (cfg.get("host", "127.0.0.1"), int(cfg.get("port", 8333))), BFTAPI
     )
