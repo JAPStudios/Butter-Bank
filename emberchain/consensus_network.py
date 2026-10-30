@@ -1,0 +1,140 @@
+"""HTTP transport for signed Biscuits BFT messages.
+
+Use HTTPS peer URLs in deployment. Messages are authenticated by the consensus
+signatures; transport encryption and peer admission remain deployment concerns.
+"""
+import hashlib
+import json
+import threading
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlparse
+
+from consensus import canonical_json
+from engine import ConsensusEngine
+
+
+class ConsensusHTTPServer:
+    def __init__(self, engine, peers=(), on_finalized=None, host="127.0.0.1", port=8334):
+        if not isinstance(engine, ConsensusEngine):
+            raise TypeError("engine must be a ConsensusEngine")
+        self.engine = engine
+        self.peers = []
+        for peer in peers:
+            parsed = urlparse(peer)
+            if (parsed.scheme not in ("https", "http") or not parsed.hostname
+                    or parsed.username or parsed.password or parsed.path not in ("", "/")
+                    or parsed.query or parsed.fragment):
+                raise ValueError("invalid consensus peer URL")
+            if parsed.scheme != "https" and parsed.hostname not in ("127.0.0.1", "localhost", "::1"):
+                raise ValueError("non-loopback consensus peers must use HTTPS")
+            self.peers.append(peer.rstrip("/"))
+        self.on_finalized = on_finalized
+        self.seen = set()
+        self.seen_lock = threading.Lock()
+        outer = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *_):
+                return
+
+            def send_json(self, status, value):
+                payload = canonical_json(value)
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def read_json(self):
+                raw = self.headers.get("Content-Length")
+                if raw is None:
+                    raise ValueError("Content-Length is required")
+                try:
+                    size = int(raw)
+                except ValueError:
+                    raise ValueError("invalid Content-Length")
+                if size < 1 or size > 1_000_000:
+                    raise ValueError("invalid message size")
+                value = json.loads(self.rfile.read(size))
+                if not isinstance(value, dict):
+                    raise ValueError("message must be a JSON object")
+                return value
+
+            def do_POST(self):
+                path = urlparse(self.path).path
+                try:
+                    message = self.read_json()
+                    if path == "/consensus/proposal":
+                        proposal, block = message.get("proposal"), message.get("block")
+                        if not isinstance(proposal, dict) or not isinstance(block, dict):
+                            self.send_json(400, {"ok": False, "error": "proposal and block objects required"})
+                            return
+                        if not outer.engine.receive_proposal(proposal, block):
+                            self.send_json(400, {"ok": False, "error": "invalid or out-of-round proposal"})
+                            return
+                        digest = outer._remember("proposal", message)
+                        if digest:
+                            outer._broadcast("/consensus/proposal", message)
+                        self.send_json(200, {"ok": True})
+                        return
+                    if path == "/consensus/vote":
+                        vote = message.get("vote")
+                        if not isinstance(vote, dict):
+                            self.send_json(400, {"ok": False, "error": "vote object required"})
+                            return
+                        digest = outer._remember("vote", message)
+                        if not digest:
+                            self.send_json(200, {"ok": True, "duplicate": True})
+                            return
+                        action = outer.engine.receive_vote(vote)
+                        if isinstance(action, dict) and "signature" in action:
+                            # Count the local validator's own precommit before relay.
+                            finalized = outer.engine.receive_vote(action)
+                            outer._broadcast("/consensus/vote", {"vote": action})
+                            if finalized is not None:
+                                outer._finalize(finalized)
+                        elif action is not None:
+                            outer._finalize(action)
+                        outer._broadcast("/consensus/vote", message)
+                        self.send_json(200, {"ok": True})
+                        return
+                    self.send_json(404, {"ok": False, "error": "not found"})
+                except (ValueError, TypeError, json.JSONDecodeError) as exc:
+                    self.send_json(400, {"ok": False, "error": str(exc)})
+                except Exception:
+                    self.send_json(500, {"ok": False, "error": "internal consensus transport error"})
+
+        self.server = ThreadingHTTPServer((host, port), Handler)
+
+    def _remember(self, kind, message):
+        digest = hashlib.sha256(kind.encode() + b":" + canonical_json(message)).hexdigest()
+        with self.seen_lock:
+            if digest in self.seen:
+                return False
+            self.seen.add(digest)
+            return True
+
+    def _broadcast(self, path, message):
+        payload = canonical_json(message)
+        for peer in self.peers:
+            request = urllib.request.Request(
+                peer + path, data=payload,
+                headers={"Content-Type": "application/json"}, method="POST"
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=3):
+                    pass
+            except Exception:
+                continue
+
+    def _finalize(self, result):
+        if self.on_finalized is not None:
+            self.on_finalized(result)
+
+    def serve_forever(self):
+        self.server.serve_forever()
+
+    def shutdown(self):
+        self.server.shutdown()
+        self.server.server_close()
