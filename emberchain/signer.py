@@ -86,6 +86,9 @@ class ConsensusSigner:
                         or vote.get("step") != parts[2]
                         or vote.get("block_hash") != entry["block_hash"]):
                     raise ValueError("persisted signing record failed signature validation")
+                if (signed_height == height and parts[2] == "precommit"
+                        and (lock is None or entry["block_hash"] != lock)):
+                    raise ValueError("persisted precommit conflicts with the current lock")
         else:
             self.state = {"chain_id": chain_id, "validator_set_hash": self.validators_hash,
                           "public_key": self.public_key, "height": initial_height,
