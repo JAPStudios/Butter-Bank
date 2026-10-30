@@ -1,0 +1,23 @@
+name: Milkchain Rust tests
+
+on:
+  push:
+    paths:
+      - "milkchain-rs/**"
+      - ".github/workflows/milkchain-rust.yml"
+  pull_request:
+    paths:
+      - "milkchain-rs/**"
+      - ".github/workflows/milkchain-rust.yml"
+
+jobs:
+  rust-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: milkchain-rs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test
