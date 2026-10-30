@@ -54,3 +54,8 @@ The four-node test is a deterministic integration test, not a substitute for for
 6. The selected proposer can request a proposal through the local node API using POST /propose with an empty JSON object. Validators automatically prevote only after local block validation. Finality requires more than two-thirds of the admitted voting power.
 
 This run mode is a development prototype. It still has no safe unlock/round-timeout protocol or automatic validator-set transition and revocation activation. The node writes the finalized block before advancing signer height; offline signers can catch up by verifying committed certificates. Disk rollback protection still requires trusted monotonic storage or equivalent operational controls. Do not use real funds or deploy a public mainnet with this version.
+
+
+## Round-change transport
+
+Validators can issue Ed25519-signed round-change messages. Each message binds the chain, height, validator-set hash, and target round. The signer persists each message before returning it and refuses to issue one while locked. The HTTP transport relays these messages at `/consensus/round-change`; a validator advances only after verifying unique messages representing strictly more than two-thirds of voting power. A locked validator retains its lock and refuses advancement. This is a deliberately conservative failover mechanism, not a complete locked-round recovery protocol. Timeout scheduling, valid-round proofs, validator-set changes, and production deployment hardening remain outstanding.
