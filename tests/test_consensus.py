@@ -134,10 +134,10 @@ class BFTPrimitiveTests(unittest.TestCase):
                                      self.block_hash, self.set_hash)
             self.assertTrue(engine.receive_proposal(proposal, block))
             local_prevote = engine.prevote(self.block_hash)
-            prevotes = [
+            prevotes = [local_prevote] + [
                 make_vote(key, self.chain_id, 1, 0, "prevote",
                           self.block_hash, self.set_hash)
-                for key, _ in self.keys_and_records[:3]
+                for key, _ in self.keys_and_records[1:3]
             ]
             precommit = None
             for vote in prevotes:
