@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 import threading
@@ -383,6 +384,7 @@ class BFTChainTests(unittest.TestCase):
                 for thread in threads:
                     thread.join(timeout=2)
 
+    @unittest.skipIf(os.name == "nt", "POSIX file-mode and symlink semantics")
     def test_bft_node_rejects_symlinked_validator_private_key(self):
         with tempfile.TemporaryDirectory() as directory:
             real = Path(directory) / "real.key"
