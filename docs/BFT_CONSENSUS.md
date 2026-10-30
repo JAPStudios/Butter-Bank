@@ -45,7 +45,7 @@ The four-node test is a deterministic integration test, not a substitute for for
 
 3. Configure issuer public keys, certificate signatures, and the current admission epoch in a copy of config.bft.example.json. The example intentionally contains placeholders and is not a runnable network configuration.
 
-4. For a remote consensus listener, configure a TLS certificate and key, bind consensus_host to the public interface, and use HTTPS URLs in consensus_peers. A non-loopback listener without TLS is rejected. Keep validator.key and the signer state file backed up securely; never commit either file.
+4. For a remote consensus listener, configure a TLS certificate and key, bind consensus_host to the public interface, and use HTTPS URLs in consensus_peers. A non-loopback listener without TLS is rejected. The node API is loopback-only; expose it externally only through an authenticated TLS reverse proxy. Keep validator.key and the signer state file backed up securely; never commit either file.
 
 5. Start the BFT node:
 
