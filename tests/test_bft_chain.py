@@ -153,6 +153,51 @@ class BFTChainTests(unittest.TestCase):
                 for thread in threads:
                     thread.join(timeout=2)
 
+    def test_offline_signer_catches_up_from_verified_commit_certificates(self):
+        with tempfile.TemporaryDirectory() as directory:
+            chain = BFTChain(self.cfg, Path(directory) / "chain.json")
+            signer = ConsensusSigner(
+                self.validator_keys[0], self.chain_id, chain.validators,
+                Path(directory) / "offline-signer.json", initial_height=1
+            )
+            block = chain.build_proposal(chain.validators[0]["public_key"])
+            set_hash = validator_set_hash(chain.validators)
+            keys_by_public = {
+                key.public_key().public_bytes_raw().hex(): key
+                for key in self.validator_keys
+            }
+            votes = [
+                make_vote(keys_by_public[item["public_key"]], self.chain_id, 1, 0,
+                          "precommit", block["hash"], set_hash)
+                for item in chain.validators[:3]
+            ]
+            self.assertTrue(chain.accept_finalized_block(block, 0, votes)[0])
+            signer.catch_up(chain.blocks[1:])
+            self.assertEqual(signer.height, 2)
+
+    def test_offline_signer_refuses_catch_up_over_conflicting_local_vote(self):
+        with tempfile.TemporaryDirectory() as directory:
+            chain = BFTChain(self.cfg, Path(directory) / "chain.json")
+            signer = ConsensusSigner(
+                self.validator_keys[0], self.chain_id, chain.validators,
+                Path(directory) / "offline-signer.json", initial_height=1
+            )
+            signer.sign_vote(0, "prevote", "ff" * 32)
+            block = chain.build_proposal(chain.validators[0]["public_key"])
+            set_hash = validator_set_hash(chain.validators)
+            keys_by_public = {
+                key.public_key().public_bytes_raw().hex(): key
+                for key in self.validator_keys
+            }
+            votes = [
+                make_vote(keys_by_public[item["public_key"]], self.chain_id, 1, 0,
+                          "precommit", block["hash"], set_hash)
+                for item in chain.validators[:3]
+            ]
+            self.assertTrue(chain.accept_finalized_block(block, 0, votes)[0])
+            with self.assertRaises(ValueError):
+                signer.catch_up(chain.blocks[1:])
+
 
 if __name__ == "__main__":
     unittest.main()
