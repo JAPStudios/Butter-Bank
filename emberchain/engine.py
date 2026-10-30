@@ -32,7 +32,7 @@ class ConsensusEngine:
         if on_finalized is not None and not callable(on_finalized):
             raise TypeError("on_finalized must be callable")
         self.on_finalized = on_finalized
-        self.round = 0
+        self.round = signer.current_round
         self.proposals = {}
         self.votes = defaultdict(dict)
         self.finalized = {}
@@ -136,7 +136,7 @@ class ConsensusEngine:
             raise RuntimeError(
                 "round advancement halted: safe locked-round unlock rules are not implemented"
             )
-        self.round += 1
+        self.round = self.signer.advance_round()
         self.proposals.clear()
         self.votes.clear()
         return self.round
