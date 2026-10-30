@@ -134,6 +134,27 @@ class BFTPrimitiveTests(unittest.TestCase):
             self.assertEqual(reopened.state["signed_round_changes"]["1"], local)
             reopened.close()
 
+
+    def test_round_change_and_vote_signing_are_mutually_exclusive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            signer = ConsensusSigner(
+                self.keys_and_records[0][0], self.chain_id, self.validators,
+                Path(directory) / "anti-equivocation-state.json"
+            )
+            signer.sign_vote(0, "prevote", self.block_hash)
+            with self.assertRaises(RuntimeError):
+                signer.sign_round_change(1)
+            signer.close()
+        with tempfile.TemporaryDirectory() as directory:
+            signer = ConsensusSigner(
+                self.keys_and_records[0][0], self.chain_id, self.validators,
+                Path(directory) / "anti-equivocation-state-2.json"
+            )
+            signer.sign_round_change(1)
+            with self.assertRaises(ValueError):
+                signer.sign_vote(0, "prevote", self.block_hash)
+            signer.close()
+
     def test_locked_signer_cannot_sign_or_accept_round_change_certificate(self):
         with tempfile.TemporaryDirectory() as directory:
             signer = ConsensusSigner(
