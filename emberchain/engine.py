@@ -57,6 +57,14 @@ class ConsensusEngine:
         self.proposals[proposal["block_hash"]] = block
         return True
 
+    def prevote(self, block_hash):
+        """Sign a prevote only for a locally validated proposal."""
+        if block_hash not in self.proposals:
+            raise ValueError("cannot prevote an unknown or invalid proposal")
+        if self.signer.state["lock"] not in (None, block_hash):
+            raise ValueError("proposal conflicts with the persisted lock")
+        return self.signer.sign_vote(self.round, "prevote", block_hash)
+
     def receive_vote(self, vote):
         """Record one authenticated vote and return a local action if quorum forms.
 
