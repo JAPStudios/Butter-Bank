@@ -231,6 +231,60 @@ class BFTPrimitiveTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 ConsensusHTTPServer(engine, peers=["http://example.com:8334"])
 
+    def test_commit_certificate_finalizes_validator_without_local_prevote_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            signer = ConsensusSigner(
+                self.keys_and_records[0][0], self.chain_id, self.validators,
+                Path(directory) / "signer.json"
+            )
+            votes = [
+                make_vote(key, self.chain_id, 1, 0, "precommit",
+                          self.block_hash, self.set_hash)
+                for key, _ in self.keys_and_records[:3]
+            ]
+            signer.finalize(votes, 0, self.block_hash)
+            self.assertEqual(signer.height, 2)
+
+    def test_engine_persists_block_callback_before_advancing_signer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            signer = ConsensusSigner(
+                self.keys_and_records[0][0], self.chain_id, self.validators,
+                Path(directory) / "signer.json"
+            )
+            observed_heights = []
+            engine = ConsensusEngine(
+                signer, lambda block: block.get("hash"),
+                on_finalized=lambda result: observed_heights.append(signer.height)
+            )
+            proposer_key = next(
+                key for key, record in self.keys_and_records
+                if record["public_key"] == select_proposer(self.validators, 1, 0)
+            )
+            block = {"hash": self.block_hash}
+            proposal = make_proposal(proposer_key, self.chain_id, 1, 0,
+                                     self.block_hash, self.set_hash)
+            self.assertTrue(engine.receive_proposal(proposal, block))
+            local_prevote = engine.prevote(self.block_hash)
+            prevotes = [local_prevote] + [
+                make_vote(key, self.chain_id, 1, 0, "prevote",
+                          self.block_hash, self.set_hash)
+                for key, _ in self.keys_and_records[1:3]
+            ]
+            precommit = None
+            for vote in prevotes:
+                action = engine.receive_vote(vote)
+                if action is not None:
+                    precommit = action
+            precommits = [precommit] + [
+                make_vote(key, self.chain_id, 1, 0, "precommit",
+                          self.block_hash, self.set_hash)
+                for key, _ in self.keys_and_records[1:3]
+            ]
+            for vote in precommits:
+                engine.receive_vote(vote)
+            self.assertEqual(observed_heights, [1])
+            self.assertEqual(signer.height, 2)
+
 
 if __name__ == "__main__":
     unittest.main()
