@@ -69,7 +69,6 @@ def load_validator_key(path):
 
 
 def bft_peer_sync_loop(chain, engine, interval=10):
-    signer = engine.signer
     while True:
         for peer in list(chain.peers):
             synchronize_peer(chain, peer)
