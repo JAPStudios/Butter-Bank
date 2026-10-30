@@ -86,6 +86,7 @@ class AdmissionCertificateTests(unittest.TestCase):
                 self.issuers, self.chain_id, 15
             )
 
+    @unittest.skipIf(os.name == "nt", "POSIX file-mode and symlink semantics")
     def test_keygen_creates_owner_only_key_and_never_overwrites(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "validator.key"
