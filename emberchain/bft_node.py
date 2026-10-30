@@ -124,8 +124,14 @@ def main():
 
     threading.Thread(target=consensus_server.serve_forever, daemon=True).start()
     threading.Thread(target=bft_peer_sync_loop, args=(chain, signer), daemon=True).start()
+    api_host = cfg.get("host", "127.0.0.1")
+    if api_host not in ("127.0.0.1", "localhost", "::1"):
+        consensus_server.shutdown()
+        raise SystemExit(
+            "The node API is loopback-only; expose it through an authenticated TLS reverse proxy."
+        )
     http_server = ThreadingHTTPServer(
-        (cfg.get("host", "127.0.0.1"), int(cfg.get("port", 8333))), BFTAPI
+        (api_host, int(cfg.get("port", 8333))), BFTAPI
     )
     print(f"Biscuits BFT node on {cfg.get('host')}:{cfg.get('port')} "
           f"| chain={chain.id} | height={len(chain.blocks)-1} "
