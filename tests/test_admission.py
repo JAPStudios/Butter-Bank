@@ -105,9 +105,13 @@ class AdmissionCertificateTests(unittest.TestCase):
                 path, self.issuers, self.chain_id, self.validator, 10, 20
             )
             self.assertEqual(signature["issuer"], self.issuers[0])
+            other_issuers = [
+                Ed25519PrivateKey.generate().public_key().public_bytes_raw().hex()
+                for _ in range(4)
+            ]
             with self.assertRaises(ValueError):
                 create_issuer_signature(
-                    path, self.issuers[1:], self.chain_id, self.validator, 10, 20
+                    path, other_issuers, self.chain_id, self.validator, 10, 20
                 )
 
 
