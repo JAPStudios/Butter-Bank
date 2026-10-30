@@ -52,13 +52,24 @@ class BFTAPI(API):
 
 def load_validator_key(path):
     key_path = Path(path)
-    if not key_path.is_file():
-        raise ValueError("validator private key file does not exist")
-    if hasattr(os, "getuid"):
-        mode = stat.S_IMODE(key_path.stat().st_mode)
-        if mode & 0o077:
-            raise ValueError("validator private key file must have permissions 0600")
-    raw = key_path.read_text(encoding="ascii").strip()
+    if key_path.is_symlink() or not key_path.is_file():
+        raise ValueError("validator private key must be a regular non-symlink file")
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(key_path, flags)
+    except OSError as exc:
+        raise ValueError("validator private key file cannot be opened safely") from exc
+    metadata = os.fstat(descriptor)
+    if not stat.S_ISREG(metadata.st_mode):
+        os.close(descriptor)
+        raise ValueError("validator private key must be a regular file")
+    if hasattr(os, "getuid") and stat.S_IMODE(metadata.st_mode) & 0o077:
+        os.close(descriptor)
+        raise ValueError("validator private key file must have permissions 0600")
+    with os.fdopen(descriptor, "r", encoding="ascii") as stream:
+        raw = stream.read().strip()
     try:
         seed = bytes.fromhex(raw)
     except ValueError:
