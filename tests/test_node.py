@@ -9,7 +9,7 @@ from pathlib import Path
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives import serialization
 
-from node import API, Chain, bhash, canon, signing_bytes
+from node import API, Chain, bhash, canon, signing_bytes, synchronize_peer
 
 
 def wallet():
@@ -145,6 +145,40 @@ class ChainValidationTests(unittest.TestCase):
         self.assertTrue(self.chain.replace(remote.blocks)[0])
         self.assertEqual(len(self.chain.blocks), 3)
 
+
+
+    def test_peer_sync_fetches_and_adopts_longer_chain(self):
+        _, _, miner = wallet()
+        remote = Chain(self.cfg, Path(self.temp.name) / "remote-periodic.json")
+        remote.mine(miner)
+        API.chain = remote
+        API.peers = []
+        server = ThreadingHTTPServer(("127.0.0.1", 0), API)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.shutdown)
+        self.addCleanup(server.server_close)
+        self.addCleanup(thread.join, 2)
+
+        peer = f"http://127.0.0.1:{server.server_port}"
+        self.assertTrue(synchronize_peer(self.chain, peer))
+        self.assertEqual(self.chain.blocks, remote.blocks)
+
+    def test_peer_sync_rejects_different_network(self):
+        other_cfg = dict(self.cfg, chain_id="different-chain")
+        remote = Chain(other_cfg, Path(self.temp.name) / "other-network.json")
+        API.chain = remote
+        API.peers = []
+        server = ThreadingHTTPServer(("127.0.0.1", 0), API)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.shutdown)
+        self.addCleanup(server.server_close)
+        self.addCleanup(thread.join, 2)
+
+        peer = f"http://127.0.0.1:{server.server_port}"
+        self.assertFalse(synchronize_peer(self.chain, peer))
+        self.assertEqual(len(self.chain.blocks), 1)
 
     def test_receive_chain_endpoint_synchronizes_a_longer_fork(self):
         _, _, first_miner = wallet()
