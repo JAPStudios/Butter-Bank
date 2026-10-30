@@ -1,4 +1,7 @@
 import unittest
+import json
+import threading
+import urllib.request
 import tempfile
 from pathlib import Path
 
@@ -15,6 +18,7 @@ from consensus import (
 )
 from signer import ConsensusSigner
 from engine import ConsensusEngine
+from consensus_network import ConsensusHTTPServer
 
 
 def validator(power=1):
@@ -178,6 +182,54 @@ class BFTPrimitiveTests(unittest.TestCase):
             signer.state["lock"] = self.block_hash
             with self.assertRaises(RuntimeError):
                 engine.advance_round()
+
+    def test_http_transport_accepts_signed_proposal_and_vote(self):
+        with tempfile.TemporaryDirectory() as directory:
+            signer = ConsensusSigner(self.keys_and_records[0][0], self.chain_id,
+                                     self.validators, Path(directory) / "network-state.json")
+            engine = ConsensusEngine(signer, lambda block: block.get("hash"))
+            server = ConsensusHTTPServer(engine, host="127.0.0.1", port=0)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            url = "http://127.0.0.1:" + str(server.server.server_address[1])
+            try:
+                proposer_key = next(
+                    key for key, record in self.keys_and_records
+                    if record["public_key"] == select_proposer(self.validators, 1, 0)
+                )
+                block = {"hash": self.block_hash}
+                proposal = make_proposal(proposer_key, self.chain_id, 1, 0,
+                                         self.block_hash, self.set_hash)
+                payload = json.dumps({"proposal": proposal, "block": block}).encode()
+                request = urllib.request.Request(
+                    url + "/consensus/proposal", data=payload,
+                    headers={"Content-Type": "application/json"}, method="POST"
+                )
+                with urllib.request.urlopen(request, timeout=2) as response:
+                    self.assertEqual(response.status, 200)
+                vote = make_vote(self.keys_and_records[1][0], self.chain_id, 1, 0,
+                                 "prevote", self.block_hash, self.set_hash)
+                payload = json.dumps({"vote": vote}).encode()
+                request = urllib.request.Request(
+                    url + "/consensus/vote", data=payload,
+                    headers={"Content-Type": "application/json"}, method="POST"
+                )
+                with urllib.request.urlopen(request, timeout=2) as response:
+                    self.assertEqual(response.status, 200)
+                self.assertIn(("0", "prevote"), {
+                    (str(key[0]), key[1]) for key in engine.votes
+                })
+            finally:
+                server.shutdown()
+                thread.join(timeout=2)
+
+    def test_transport_rejects_remote_plain_http_peer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            signer = ConsensusSigner(self.keys_and_records[0][0], self.chain_id,
+                                     self.validators, Path(directory) / "network-state.json")
+            engine = ConsensusEngine(signer, lambda block: block.get("hash"))
+            with self.assertRaises(ValueError):
+                ConsensusHTTPServer(engine, peers=["http://example.com:8334"])
 
 
 if __name__ == "__main__":
