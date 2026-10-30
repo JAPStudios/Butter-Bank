@@ -115,6 +115,19 @@ class AdmissionCertificateTests(unittest.TestCase):
                     path, other_issuers, self.chain_id, self.validator, 10, 20
                 )
 
+    def test_credential_issuer_key_cannot_also_be_a_validator(self):
+        validators = [self.issuers[0]] + [
+            Ed25519PrivateKey.generate().public_key().public_bytes_raw().hex()
+            for _ in range(3)
+        ]
+        certificates = [
+            self.certificate(validator_key=key) for key in validators
+        ]
+        with self.assertRaisesRegex(ValueError, "cannot also be validators"):
+            validator_set_from_certificates(
+                certificates, self.issuers, self.chain_id, 15
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
