@@ -5,6 +5,7 @@ signatures; transport encryption and peer admission remain deployment concerns.
 """
 import hashlib
 from collections import deque
+import time
 import json
 import os
 import stat
@@ -16,6 +17,33 @@ from urllib.parse import urlparse
 
 from consensus import canonical_json, verify_vote
 from engine import ConsensusEngine
+
+
+class BoundedThreadingHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+    block_on_close = False
+
+    def __init__(self, server_address, handler_class, max_workers=64):
+        if not isinstance(max_workers, int) or isinstance(max_workers, bool) or max_workers < 1:
+            raise ValueError("max_workers must be a positive integer")
+        self._request_slots = threading.BoundedSemaphore(max_workers)
+        super().__init__(server_address, handler_class)
+
+    def process_request(self, request, client_address):
+        if not self._request_slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self._request_slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._request_slots.release()
 
 
 class ConsensusHTTPServer:
@@ -43,6 +71,8 @@ class ConsensusHTTPServer:
         self.seen = set()
         self.seen_order = deque()
         self.seen_lock = threading.Lock()
+        self.request_history = {}
+        self.request_lock = threading.Lock()
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -72,7 +102,34 @@ class ConsensusHTTPServer:
                     raise ValueError("message must be a JSON object")
                 return value
 
+        def rate_allowed(self):
+            address = self.client_address[0]
+            now = time.monotonic()
+            with outer.request_lock:
+                history = outer.request_history.get(address)
+                if history is None:
+                    if len(outer.request_history) >= 10_000:
+                        expired = [
+                            ip for ip, events in outer.request_history.items()
+                            if not events or now - events[-1] > 60
+                        ]
+                        for ip in expired:
+                            outer.request_history.pop(ip, None)
+                        if len(outer.request_history) >= 10_000:
+                            return False
+                    history = deque()
+                    outer.request_history[address] = history
+                while history and now - history[0] > 60:
+                    history.popleft()
+                if len(history) >= 600:
+                    return False
+                history.append(now)
+                return True
+
             def do_POST(self):
+                if not self.rate_allowed():
+                    self.send_json(429, {"ok": False, "error": "consensus request rate limit exceeded"})
+                    return
                 path = urlparse(self.path).path
                 try:
                     message = self.read_json()
@@ -130,7 +187,7 @@ class ConsensusHTTPServer:
                 except Exception:
                     self.send_json(500, {"ok": False, "error": "internal consensus transport error"})
 
-        self.server = ThreadingHTTPServer((host, port), Handler)
+        self.server = BoundedThreadingHTTPServer((host, port), Handler, max_workers=64)
         if host not in ("127.0.0.1", "localhost", "::1") and not (tls_certfile and tls_keyfile):
             self.server.server_close()
             raise ValueError("non-loopback consensus listeners require a TLS certificate and private key")
