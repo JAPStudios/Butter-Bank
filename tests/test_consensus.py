@@ -14,6 +14,7 @@ from consensus import (
     verify_vote,
 )
 from signer import ConsensusSigner
+from engine import ConsensusEngine
 
 
 def validator(power=1):
@@ -117,6 +118,66 @@ class BFTPrimitiveTests(unittest.TestCase):
         wrong = next(k for k, record in self.keys_and_records if record['public_key'] != selected)
         proposal = make_proposal(wrong, self.chain_id, 1, 0, self.block_hash, self.set_hash)
         self.assertFalse(verify_proposal(proposal, self.validators, self.chain_id))
+
+    def test_engine_finalizes_only_after_prevotes_and_precommits_quorum(self):
+        with tempfile.TemporaryDirectory() as directory:
+            local_key = self.keys_and_records[0][0]
+            signer = ConsensusSigner(local_key, self.chain_id, self.validators,
+                                     Path(directory) / "engine-state.json")
+            engine = ConsensusEngine(signer, lambda block: block.get("hash"))
+            proposer_key = next(
+                key for key, record in self.keys_and_records
+                if record["public_key"] == select_proposer(self.validators, 1, 0)
+            )
+            block = {"hash": self.block_hash, "payload": "valid-test-block"}
+            proposal = make_proposal(proposer_key, self.chain_id, 1, 0,
+                                     self.block_hash, self.set_hash)
+            self.assertTrue(engine.receive_proposal(proposal, block))
+            local_prevote = engine.prevote(self.block_hash)
+            prevotes = [
+                make_vote(key, self.chain_id, 1, 0, "prevote",
+                          self.block_hash, self.set_hash)
+                for key, _ in self.keys_and_records[:3]
+            ]
+            precommit = None
+            for vote in prevotes:
+                action = engine.receive_vote(vote)
+                if action is not None:
+                    precommit = action
+            self.assertIsNotNone(precommit)
+            self.assertTrue(verify_vote(precommit, self.validators, self.chain_id))
+            precommits = [
+                make_vote(key, self.chain_id, 1, 0, "precommit",
+                          self.block_hash, self.set_hash)
+                for key, _ in self.keys_and_records[1:3]
+            ] + [precommit]
+            finalized = None
+            for vote in precommits:
+                action = engine.receive_vote(vote)
+                if action is not None:
+                    finalized = action
+            self.assertIsNotNone(finalized)
+            self.assertEqual(finalized["block"], block)
+            self.assertEqual(signer.height, 2)
+
+    def test_engine_rejects_invalid_block_and_halts_locked_round_change(self):
+        with tempfile.TemporaryDirectory() as directory:
+            signer = ConsensusSigner(
+                self.keys_and_records[0][0], self.chain_id, self.validators,
+                Path(directory) / "engine-state.json"
+            )
+            engine = ConsensusEngine(signer, lambda block: block.get("hash"))
+            proposer_key = next(
+                key for key, record in self.keys_and_records
+                if record["public_key"] == select_proposer(self.validators, 1, 0)
+            )
+            proposal = make_proposal(proposer_key, self.chain_id, 1, 0,
+                                     self.block_hash, self.set_hash)
+            self.assertFalse(engine.receive_proposal(proposal, {"hash": "cd" * 32}))
+            self.assertEqual(engine.advance_round(), 1)
+            signer.state["lock"] = self.block_hash
+            with self.assertRaises(RuntimeError):
+                engine.advance_round()
 
 
 if __name__ == "__main__":
