@@ -47,7 +47,7 @@ class ConsensusSigner:
                 raise ValueError("persisted lock round exists without a lock")
             if lock is not None and (
                 not isinstance(locked_round, int) or isinstance(locked_round, bool)
-                or locked_round < 0
+                or locked_round < 0 or locked_round > self.state["round"]
             ):
                 raise ValueError("invalid persisted lock round")
             for slot, entry in self.state["signed"].items():
@@ -61,6 +61,7 @@ class ConsensusSigner:
                 except ValueError:
                     raise ValueError("invalid persisted signing slot")
                 if (signed_height < 1 or signed_round < 0
+                        or (signed_height == height and signed_round > self.state["round"])
                         or parts[2] not in ("prevote", "precommit")
                         or not _is_hex(entry.get("block_hash"), 32)
                         or not isinstance(entry.get("vote"), dict)):
