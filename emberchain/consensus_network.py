@@ -4,13 +4,14 @@ Use HTTPS peer URLs in deployment. Messages are authenticated by the consensus
 signatures; transport encryption and peer admission remain deployment concerns.
 """
 import hashlib
+from collections import deque
 import json
 import threading
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
-from consensus import canonical_json
+from consensus import canonical_json, verify_vote
 from engine import ConsensusEngine
 
 
@@ -31,6 +32,7 @@ class ConsensusHTTPServer:
             self.peers.append(peer.rstrip("/"))
         self.on_finalized = on_finalized
         self.seen = set()
+        self.seen_order = deque()
         self.seen_lock = threading.Lock()
         outer = self
 
@@ -83,6 +85,11 @@ class ConsensusHTTPServer:
                         if not isinstance(vote, dict):
                             self.send_json(400, {"ok": False, "error": "vote object required"})
                             return
+                        if (not verify_vote(vote, outer.engine.validators, outer.engine.chain_id)
+                                or vote["height"] != outer.engine.height
+                                or vote["round"] != outer.engine.round):
+                            self.send_json(400, {"ok": False, "error": "invalid or out-of-round vote"})
+                            return
                         digest = outer._remember("vote", message)
                         if not digest:
                             self.send_json(200, {"ok": True, "duplicate": True})
@@ -113,6 +120,10 @@ class ConsensusHTTPServer:
             if digest in self.seen:
                 return False
             self.seen.add(digest)
+            self.seen_order.append(digest)
+            if len(self.seen_order) > 100_000:
+                expired = self.seen_order.popleft()
+                self.seen.discard(expired)
             return True
 
     def _broadcast(self, path, message):
