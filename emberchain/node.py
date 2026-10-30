@@ -11,6 +11,14 @@ MAX_TXS=100
 def canon(x): return json.dumps(x,sort_keys=True,separators=(',',':')).encode()
 def sha(b): return hashlib.sha256(b).hexdigest()
 def bhash(b): return sha(canon({k:b[k] for k in ('height','previous_hash','timestamp','transactions','nonce')}))
+
+def block_work(difficulty):
+    # Current proof-of-work target requires N leading hexadecimal zeroes.
+    # Its expected work is 16**N, represented exactly as an integer.
+    return 1 << (4*difficulty)
+
+def chain_work(blocks,difficulty):
+    return sum(block_work(difficulty) for _ in blocks[1:])
 def ishex(s,n):
     try: return isinstance(s,str) and len(s)==2*n and len(bytes.fromhex(s))==n
     except (ValueError,TypeError): return False
@@ -183,7 +191,7 @@ class Chain:
     def replace(self,bs):
         with self.lock:
             if not self.valid_chain(bs):return False,'candidate chain invalid'
-            if len(bs)<=len(self.blocks):return False,'candidate has no greater cumulative work'
+            if chain_work(bs,self.diff)<=chain_work(self.blocks,self.diff):return False,'candidate has no greater cumulative work'
             # Transactions from blocks orphaned by this reorganization are not
             # lost: return them to the mempool unless the new chain includes
             # them or they are no longer valid against the replacement state.
