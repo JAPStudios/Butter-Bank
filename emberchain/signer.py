@@ -153,8 +153,8 @@ class ConsensusSigner:
         if not verify_commit_certificate(votes, records, self.chain_id,
                                          self.height, round_number, block_hash):
             raise ValueError("invalid commit certificate")
-        if self.state["lock"] != block_hash:
-            raise ValueError("finalized block does not match local lock")
+        if self.state["lock"] not in (None, block_hash):
+            raise ValueError("finalized block conflicts with the persisted lock")
         self.state["height"] += 1
         self.state["lock"] = None
         self.state["locked_round"] = None
