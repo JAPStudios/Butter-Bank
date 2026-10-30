@@ -189,7 +189,8 @@ impl BftChain {
             chain_id, validators, validator_power: power_map, total_power,
             genesis_allocations, blocks: Vec::new(), data_path,
         };
-        chain.blocks.push(chain.genesis_block()?);
+        let genesis = chain.genesis_block()?;
+        chain.blocks.push(genesis);
         if let Some(path) = chain.data_path.clone() {
             if path.exists() {
                 chain.load_existing(&path)?;
