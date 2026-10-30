@@ -38,6 +38,7 @@ def main():
     try:
         status=get_json(node+'/status')
         balances=get_json(node+'/balances')
+        mempool=get_json(node+'/mempool')
     except Exception as e:
         p.error(f'cannot read node status and balances: {e}')
     chain_id=status.get('chain_id')
@@ -45,8 +46,11 @@ def main():
     if a.chain_id and a.chain_id!=chain_id: p.error('provided chain ID does not match the node')
     nonce=a.nonce
     if nonce is None:
-        try: nonce=balances['nonces'].get(public.hex(),0)+1
-        except (KeyError,TypeError): p.error('node returned invalid nonce data')
+        try:
+            nonce=balances['nonces'].get(public.hex(),0)+1
+            pending=[item['nonce'] for item in mempool['transactions'] if item.get('sender')==public.hex() and isinstance(item.get('nonce'),int) and not isinstance(item.get('nonce'),bool)]
+            if pending: nonce=max(nonce,max(pending)+1)
+        except (KeyError,TypeError): p.error('node returned invalid nonce or mempool data')
     if not isinstance(nonce,int) or isinstance(nonce,bool) or nonce<1: p.error('--nonce must be a positive integer')
     tx={'chain_id':chain_id,'sender':public.hex(),'recipient':a.to.lower(),'amount':a.amount,'fee':a.fee,'nonce':nonce}
     tx['signature']=key.sign(canon(tx)).hex()
