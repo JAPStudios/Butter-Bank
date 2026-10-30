@@ -184,9 +184,20 @@ class Chain:
         with self.lock:
             if not self.valid_chain(bs):return False,'candidate chain invalid'
             if len(bs)<=len(self.blocks):return False,'candidate has no greater cumulative work'
-            old_pool=list(self.pool); self.blocks=bs; self.pool=old_pool
+            # Transactions from blocks orphaned by this reorganization are not
+            # lost: return them to the mempool unless the new chain includes
+            # them or they are no longer valid against the replacement state.
             included={sha(canon(t)) for block in bs[1:] for t in block['transactions'][1:]}
-            self.pool=[t for t in self.pool if sha(canon(t)) not in included]
+            new_pool=list(self.pool)
+            for block in self.blocks[1:]:
+                for tx in block['transactions'][1:]:
+                    if sha(canon(tx)) not in included:
+                        new_pool.append(tx)
+            unique_pool={}
+            for tx in new_pool:
+                unique_pool[sha(canon(tx))]=tx
+            self.blocks=list(bs)
+            self.pool=[tx for tx in unique_pool.values() if sha(canon(tx)) not in included]
             self._revalidate_pool(); self.save(); return True,'replaced'
 
 class API(BaseHTTPRequestHandler):
