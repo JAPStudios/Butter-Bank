@@ -695,7 +695,7 @@ class BFTRoundTimeoutLoopTests(unittest.TestCase):
 
     def test_timeout_loop_rejects_invalid_timeout_configuration(self):
         server = self.FakeServer()
-        for initial, maximum in ((0, 8), (-1, 8), (True, 8), (2, 1), (2, False)):
+        for initial, maximum in ((0, 8), (-1, 8), (True, 8), (2, 1), (2, False), (float("nan"), 8), (2, float("inf")), (2, float("nan")) ):
             with self.subTest(initial=initial, maximum=maximum):
                 with self.assertRaises(ValueError):
                     bft_round_timeout_loop(
