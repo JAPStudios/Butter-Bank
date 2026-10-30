@@ -459,6 +459,47 @@ class BFTPrimitiveTests(unittest.TestCase):
             second = ConsensusSigner(key, self.chain_id, self.validators, path)
             second.close()
 
+    def test_engine_counts_at_most_one_vote_per_validator_per_round_step(self):
+        with tempfile.TemporaryDirectory() as directory:
+            signer = ConsensusSigner(
+                self.keys_and_records[0][0], self.chain_id, self.validators,
+                Path(directory) / "state.json"
+            )
+            engine = ConsensusEngine(signer, lambda block: block.get("hash"))
+            first = make_vote(
+                self.keys_and_records[1][0], self.chain_id, 1, 0,
+                "prevote", self.block_hash, self.set_hash
+            )
+            conflicting = make_vote(
+                self.keys_and_records[1][0], self.chain_id, 1, 0,
+                "prevote", "ab" * 32, self.set_hash
+            )
+            self.assertIsNone(engine.receive_vote(first))
+            self.assertIsNone(engine.receive_vote(conflicting))
+            self.assertEqual(len(engine.votes[(0, "prevote")]), 1)
+            self.assertEqual(
+                engine.votes[(0, "prevote")][first["validator"]]["block_hash"],
+                self.block_hash
+            )
+
+    def test_engine_ignores_stale_future_and_wrong_chain_votes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            signer = ConsensusSigner(
+                self.keys_and_records[0][0], self.chain_id, self.validators,
+                Path(directory) / "state.json"
+            )
+            engine = ConsensusEngine(signer, lambda block: block.get("hash"))
+            for height, round_number, chain_id in (
+                (0, 0, self.chain_id), (2, 0, self.chain_id),
+                (1, 1, self.chain_id), (1, 0, "other-chain")
+            ):
+                vote = make_vote(
+                    self.keys_and_records[1][0], chain_id, height, round_number,
+                    "prevote", self.block_hash, self.set_hash
+                )
+                self.assertIsNone(engine.receive_vote(vote))
+            self.assertEqual(sum(len(votes) for votes in engine.votes.values()), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
