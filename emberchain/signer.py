@@ -200,6 +200,14 @@ class ConsensusSigner:
         with self._lock:
             return self.state["lock"]
 
+    @property
+    def pending_round_change_targets(self):
+        with self._lock:
+            return tuple(sorted(
+                int(target) for target in self.state.get("signed_round_changes", {})
+                if int(target) > self.state["round"]
+            ))
+
     @_synchronized
     def sign_round_change(self, target_round):
         """Persist a signed request for a later round; locked validators refuse."""
