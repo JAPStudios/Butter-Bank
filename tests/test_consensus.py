@@ -12,11 +12,14 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from consensus import (
     make_proposal,
     make_vote,
+    make_round_change,
     select_proposer,
     validator_set_hash,
     verify_commit_certificate,
     verify_proposal,
     verify_vote,
+    verify_round_change,
+    verify_round_change_certificate,
 )
 from signer import ConsensusSigner
 from engine import ConsensusEngine
@@ -83,6 +86,36 @@ class BFTPrimitiveTests(unittest.TestCase):
             dict(vote, block_hash=vote["block_hash"].upper()),
             self.validators, self.chain_id
         ))
+
+
+    def test_round_change_certificate_requires_authenticated_supermajority(self):
+        messages = [
+            make_round_change(key, self.chain_id, 1, 1, self.set_hash)
+            for key, _ in self.keys_and_records[:3]
+        ]
+        self.assertTrue(verify_round_change(messages[0], self.validators, self.chain_id))
+        self.assertTrue(verify_round_change_certificate(
+            messages, self.validators, self.chain_id, 1, 1
+        ))
+        self.assertFalse(verify_round_change_certificate(
+            messages[:1], self.validators, self.chain_id, 1, 1
+        ))
+        self.assertFalse(verify_round_change_certificate(
+            messages + [messages[0]], self.validators, self.chain_id, 1, 1
+        ))
+        self.assertFalse(verify_round_change_certificate(
+            messages, self.validators, self.chain_id, 1, 2
+        ))
+        altered = dict(messages[0], round=2)
+        self.assertFalse(verify_round_change(altered, self.validators, self.chain_id))
+
+    def test_round_change_is_chain_and_validator_set_bound(self):
+        message = make_round_change(
+            self.keys_and_records[0][0], self.chain_id, 1, 2, self.set_hash
+        )
+        self.assertFalse(verify_round_change(message, self.validators, "other-chain"))
+        changed_set = self.validators[:-1]
+        self.assertFalse(verify_round_change(message, changed_set, self.chain_id))
 
     def test_commit_requires_strictly_more_than_two_thirds_power(self):
         votes = [
