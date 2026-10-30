@@ -6,6 +6,7 @@ unsafe unlock rules. A later protocol revision must implement and test the
 complete locked-round/valid-round rules before production use.
 """
 from collections import defaultdict
+import threading
 
 from consensus import (
     normalize_validator_set,
@@ -15,12 +16,20 @@ from consensus import (
 from signer import ConsensusSigner
 
 
+def _synchronized(method):
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return wrapper
+
+
 class ConsensusEngine:
     def __init__(self, signer: ConsensusSigner, block_validator, on_finalized=None):
         if not isinstance(signer, ConsensusSigner):
             raise TypeError("signer must be a ConsensusSigner")
         if not callable(block_validator):
             raise TypeError("block_validator must be callable")
+        self._lock = threading.RLock()
         self.signer = signer
         self.chain_id = signer.chain_id
         self.validators = [
@@ -41,6 +50,7 @@ class ConsensusEngine:
     def height(self):
         return self.signer.height
 
+    @_synchronized
     def receive_proposal(self, proposal, block):
         """Validate and cache a proposal; return False for any invalid input.
 
@@ -60,6 +70,7 @@ class ConsensusEngine:
         self.proposals[proposal["block_hash"]] = block
         return True
 
+    @_synchronized
     def prevote(self, block_hash):
         """Sign a prevote only for a locally validated proposal."""
         if block_hash not in self.proposals:
@@ -68,6 +79,7 @@ class ConsensusEngine:
             raise ValueError("proposal conflicts with the persisted lock")
         return self.signer.sign_vote(self.round, "prevote", block_hash)
 
+    @_synchronized
     def receive_vote(self, vote):
         """Record one authenticated vote and return a local action if quorum forms.
 
@@ -103,6 +115,7 @@ class ConsensusEngine:
 
         return self.retry_pending_finalization()
 
+    @_synchronized
     def retry_pending_finalization(self):
         """Retry a quorum commit after a transient block-persistence failure."""
         slot = (self.round, "precommit")
@@ -140,6 +153,7 @@ class ConsensusEngine:
             return result
         return None
 
+    @_synchronized
     def advance_round(self):
         """Advance only while unlocked; locked-round unlock rules are not yet safe."""
         if self.signer.state["lock"] is not None:
