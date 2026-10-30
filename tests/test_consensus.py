@@ -125,6 +125,9 @@ class BFTPrimitiveTests(unittest.TestCase):
             path = Path(directory) / 'validator-state.json'
             signer = ConsensusSigner(key, self.chain_id, self.validators, path)
             vote = signer.sign_vote(0, 'prevote', self.block_hash)
+            with self.assertRaisesRegex(RuntimeError, "already in use"):
+                ConsensusSigner(key, self.chain_id, self.validators, path)
+            signer.close()
             reopened = ConsensusSigner(key, self.chain_id, self.validators, path)
             self.assertEqual(vote, reopened.sign_vote(0, 'prevote', self.block_hash))
             with self.assertRaises(ValueError):
@@ -384,9 +387,11 @@ class BFTPrimitiveTests(unittest.TestCase):
                     range(32)
                 ))
             self.assertTrue(all(vote == votes[0] for vote in votes))
+            signer.close()
             reopened = ConsensusSigner(key, self.chain_id, self.validators,
                                        Path(directory) / "state.json")
             self.assertEqual(reopened.sign_vote(0, "prevote", self.block_hash), votes[0])
+            reopened.close()
 
     def test_concurrent_duplicate_network_votes_count_once(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -437,6 +442,17 @@ class BFTPrimitiveTests(unittest.TestCase):
             link.symlink_to(real)
             with self.assertRaisesRegex(ValueError, "symbolic link"):
                 ConsensusSigner(key, self.chain_id, self.validators, link)
+
+    def test_signer_exclusive_process_lock_is_released_on_close(self):
+        key, _ = self.keys_and_records[0]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            first = ConsensusSigner(key, self.chain_id, self.validators, path)
+            with self.assertRaisesRegex(RuntimeError, "already in use"):
+                ConsensusSigner(key, self.chain_id, self.validators, path)
+            first.close()
+            second = ConsensusSigner(key, self.chain_id, self.validators, path)
+            second.close()
 
 
 if __name__ == "__main__":
