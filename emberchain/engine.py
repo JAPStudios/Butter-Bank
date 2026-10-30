@@ -75,7 +75,7 @@ class ConsensusEngine:
         """Sign a prevote only for a locally validated proposal."""
         if block_hash not in self.proposals:
             raise ValueError("cannot prevote an unknown or invalid proposal")
-        if self.signer.state["lock"] not in (None, block_hash):
+        if self.signer.locked_block_hash not in (None, block_hash):
             raise ValueError("proposal conflicts with the persisted lock")
         return self.signer.sign_vote(self.round, "prevote", block_hash)
 
@@ -154,9 +154,17 @@ class ConsensusEngine:
         return None
 
     @_synchronized
+    def catch_up(self, finalized_blocks):
+        """Apply already-verified committed history and reset round-local state."""
+        self.signer.catch_up(finalized_blocks)
+        self.round = self.signer.current_round
+        self.proposals.clear()
+        self.votes.clear()
+
+    @_synchronized
     def advance_round(self):
         """Advance only while unlocked; locked-round unlock rules are not yet safe."""
-        if self.signer.state["lock"] is not None:
+        if self.signer.locked_block_hash is not None:
             raise RuntimeError(
                 "round advancement halted: safe locked-round unlock rules are not implemented"
             )
