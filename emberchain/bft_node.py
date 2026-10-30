@@ -73,10 +73,9 @@ def bft_peer_sync_loop(chain, engine, interval=10):
     while True:
         for peer in list(chain.peers):
             synchronize_peer(chain, peer)
-        if signer.height < len(chain.blocks):
-            engine.catch_up(chain.blocks[signer.height:])
-        elif signer.height > len(chain.blocks):
-            raise RuntimeError("validator signer is ahead of the locally persisted finalized chain")
+        with chain.lock:
+            committed_snapshot = list(chain.blocks)
+        engine.catch_up_chain(committed_snapshot)
         time.sleep(interval)
 
 
