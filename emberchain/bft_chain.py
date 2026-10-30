@@ -119,11 +119,18 @@ class BFTChain(Chain):
             finalized["commit_certificate"] = list(commit_votes)
             if not self.valid_chain(self.blocks + [finalized]):
                 return False, "invalid BFT-finalized block or commit certificate"
-            self.blocks.append(finalized)
+            previous_blocks = self.blocks
+            previous_pool = self.pool
+            self.blocks = list(self.blocks) + [finalized]
             included = {sha(canon(tx)) for tx in finalized["transactions"][1:]}
             self.pool = [tx for tx in self.pool if sha(canon(tx)) not in included]
-            self._revalidate_pool()
-            self.save()
+            try:
+                self._revalidate_pool()
+                self.save()
+            except Exception:
+                self.blocks = previous_blocks
+                self.pool = previous_pool
+                raise
             return True, "BFT block finalized"
 
     def replace(self, blocks):
@@ -135,9 +142,16 @@ class BFTChain(Chain):
                 return False, "candidate BFT chain does not extend local finality"
             if blocks[:len(self.blocks)] != self.blocks:
                 return False, "candidate conflicts with locally finalized history"
+            previous_blocks = self.blocks
+            previous_pool = self.pool
             included = {sha(canon(tx)) for block in blocks[1:] for tx in block["transactions"][1:]}
             self.blocks = list(blocks)
             self.pool = [tx for tx in self.pool if sha(canon(tx)) not in included]
-            self._revalidate_pool()
-            self.save()
+            try:
+                self._revalidate_pool()
+                self.save()
+            except Exception:
+                self.blocks = previous_blocks
+                self.pool = previous_pool
+                raise
             return True, "BFT chain extended"
