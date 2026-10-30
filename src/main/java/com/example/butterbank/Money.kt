@@ -23,10 +23,13 @@ object Money {
     fun parsePositiveCents(raw: String): Long? {
         return try {
             val amount = BigDecimal(raw.trim())
-            if (amount <= BigDecimal.ZERO) return null
-            amount.setScale(2, RoundingMode.UNNECESSARY)
-                .movePointRight(2)
-                .longValueExact()
+            if (amount <= BigDecimal.ZERO) {
+                null
+            } else {
+                amount.setScale(2, RoundingMode.UNNECESSARY)
+                    .movePointRight(2)
+                    .longValueExact()
+            }
         } catch (_: NumberFormatException) {
             null
         } catch (_: ArithmeticException) {
