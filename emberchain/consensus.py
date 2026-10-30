@@ -237,6 +237,12 @@ def verify_commit_certificate(
 ) -> bool:
     """Require unique valid precommit votes representing strictly >2/3 power."""
     try:
+        if (not isinstance(height, int) or isinstance(height, bool) or height < 1
+                or not isinstance(round_number, int) or isinstance(round_number, bool)
+                or round_number < 0 or not _is_hex(block_hash, 32)):
+            return False
+        if not isinstance(votes, Sequence) or isinstance(votes, (str, bytes)):
+            return False
         normalized = normalize_validator_set(validators)
         expected_set_hash = validator_set_hash(validators)
         seen: set[str] = set()
