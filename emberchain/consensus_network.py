@@ -99,6 +99,9 @@ class ConsensusHTTPServer:
                             return
                         digest = outer._remember("vote", message)
                         if not digest:
+                            pending = outer.engine.retry_pending_finalization()
+                            if pending is not None:
+                                outer._finalize(pending)
                             self.send_json(200, {"ok": True, "duplicate": True})
                             return
                         action = outer.engine.receive_vote(vote)
@@ -153,6 +156,9 @@ class ConsensusHTTPServer:
             raise ValueError("local vote is invalid or out of round")
         message = {"vote": vote}
         if not self._remember("vote", message):
+            pending = self.engine.retry_pending_finalization()
+            if pending is not None:
+                self._finalize(pending)
             return False
         action = self.engine.receive_vote(vote)
         if isinstance(action, dict) and "signature" in action:
