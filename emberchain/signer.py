@@ -2,9 +2,17 @@
 import json
 import os
 import tempfile
+import threading
 from pathlib import Path
 
 from consensus import make_vote, normalize_validator_set, validator_set_hash, verify_vote, verify_commit_certificate, _is_hex
+
+
+def _synchronized(method):
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return wrapper
 
 
 class ConsensusSigner:
@@ -13,6 +21,7 @@ class ConsensusSigner:
     def __init__(self, private_key, chain_id, validators, state_path, initial_height=1):
         if not isinstance(initial_height, int) or isinstance(initial_height, bool) or initial_height < 1:
             raise ValueError("initial_height must be a positive integer")
+        self._lock = threading.RLock()
         self.key = private_key
         self.public_key = private_key.public_key().public_bytes_raw().hex()
         self.chain_id = chain_id
@@ -91,6 +100,7 @@ class ConsensusSigner:
     def current_round(self):
         return self.state["round"]
 
+    @_synchronized
     def advance_round(self):
         self.state["round"] += 1
         self._save()
@@ -121,6 +131,7 @@ class ConsensusSigner:
                 pass
             raise
 
+    @_synchronized
     def lock_from_prevotes(self, votes, round_number, block_hash):
         if not isinstance(round_number, int) or isinstance(round_number, bool) or round_number < 0:
             raise ValueError("round_number must be a non-negative integer")
@@ -149,6 +160,7 @@ class ConsensusSigner:
         self.state["locked_round"] = round_number
         self._save()
 
+    @_synchronized
     def sign_vote(self, round_number, step, block_hash):
         if round_number != self.current_round:
             raise ValueError("refusing to sign outside the current persisted round")
@@ -179,6 +191,7 @@ class ConsensusSigner:
                 return True
         return False
 
+    @_synchronized
     def catch_up(self, finalized_blocks):
         """Advance over committed blocks, preserving evidence of conflicting local votes."""
         for block in finalized_blocks:
@@ -212,6 +225,7 @@ class ConsensusSigner:
             self.state["locked_round"] = None
             self._save()
 
+    @_synchronized
     def finalize(self, votes, round_number, block_hash):
         records = [{"public_key": k, "voting_power": v} for k, v in self.validators.items()]
         if round_number != self.current_round:
