@@ -12,6 +12,8 @@ class BFTChain(Chain):
     """Account ledger whose blocks are accepted only with a >2/3 BFT certificate."""
 
     def __init__(self, cfg, path):
+        if not isinstance(cfg, dict):
+            raise ValueError("configuration must be a JSON object")
         if cfg.get("consensus") != "bft":
             raise ValueError("BFTChain requires consensus='bft'")
         self.validators = validator_set_from_certificates(
