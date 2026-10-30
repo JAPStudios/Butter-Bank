@@ -168,17 +168,27 @@ class API(BaseHTTPRequestHandler):
     def sendj(self,code,obj):
         b=canon(obj); self.send_response(code); self.send_header('Content-Type','application/json'); self.send_header('Content-Length',str(len(b))); self.end_headers(); self.wfile.write(b)
     def body(self):
-        n=int(self.headers.get('Content-Length','0'))
+        raw_length=self.headers.get('Content-Length')
+        if raw_length is None: raise ValueError('Content-Length is required')
+        try: n=int(raw_length)
+        except ValueError: raise ValueError('invalid Content-Length')
         if n<1 or n>1000000: raise ValueError('invalid body size')
-        return json.loads(self.rfile.read(n))
+        value=json.loads(self.rfile.read(n))
+        if not isinstance(value,dict): raise ValueError('JSON request body must be an object')
+        return value
     def do_GET(self):
         p=urlparse(self.path).path
-        if p=='/status': self.sendj(200,{'chain_id':self.chain.id,'height':len(self.chain.blocks)-1,'tip':self.chain.blocks[-1]['hash'],'difficulty':self.chain.diff,'mempool_size':len(self.chain.pool),'symbol':self.chain.cfg.get('symbol','COIN')})
-        elif p=='/chain': self.sendj(200,{'chain':self.chain.blocks})
+        if p=='/status':
+            with self.chain.lock:
+                self.sendj(200,{'chain_id':self.chain.id,'genesis_hash':self.chain.blocks[0]['hash'],'height':len(self.chain.blocks)-1,'tip':self.chain.blocks[-1]['hash'],'difficulty':self.chain.diff,'block_reward':self.chain.reward,'mempool_size':len(self.chain.pool),'symbol':self.chain.cfg.get('symbol','COIN')})
+        elif p=='/chain':
+            with self.chain.lock: self.sendj(200,{'chain':list(self.chain.blocks)})
         elif p=='/balances':
-            b,n=self.chain.state(); self.sendj(200,{'balances':b,'nonces':n})
-        elif p=='/mempool': self.sendj(200,{'transactions':self.chain.pool})
-        elif p=='/peers': self.sendj(200,{'peers':self.peers})
+            with self.chain.lock: b,n=self.chain.state()
+            self.sendj(200,{'balances':b,'nonces':n})
+        elif p=='/mempool':
+            with self.chain.lock: self.sendj(200,{'transactions':list(self.chain.pool)})
+        elif p=='/peers': self.sendj(200,{'peers':list(self.peers)})
         else:self.sendj(404,{'error':'not found'})
     def do_POST(self):
         try:
@@ -194,13 +204,24 @@ class API(BaseHTTPRequestHandler):
             elif p=='/receive-block':
                 ok,msg=self.chain.accept_block(d); self.sendj(200 if ok else 400,{'ok':ok,'message':msg})
             elif p=='/connect':
-                peer=d.get('peer','').rstrip('/')
-                if not peer.startswith(('http://','https://')):self.sendj(400,{'error':'peer must be an HTTP(S) URL'});return
+                raw_peer=d.get('peer')
+                if not isinstance(raw_peer,str): self.sendj(400,{'error':'peer must be an HTTP(S) URL'});return
+                parsed=urlparse(raw_peer)
+                if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username or parsed.password or parsed.path not in ('','/') or parsed.query or parsed.fragment:
+                    self.sendj(400,{'error':'peer must be a base HTTP(S) URL without credentials, path, query, or fragment'});return
+                try: parsed.port
+                except ValueError: self.sendj(400,{'error':'peer URL has an invalid port'});return
+                peer=raw_peer.rstrip('/')
                 status=get(peer+'/status')
-                if status['chain_id']!=self.chain.id:self.sendj(400,{'error':'different chain_id'});return
+                expected={'chain_id':self.chain.id,'genesis_hash':self.chain.blocks[0]['hash'],'difficulty':self.chain.diff,'block_reward':self.chain.reward}
+                if any(status.get(k)!=v for k,v in expected.items()):
+                    self.sendj(400,{'error':'peer is on a different network configuration'});return
+                remote_chain=get(peer+'/chain').get('chain')
+                if not self.chain.valid_chain(remote_chain):
+                    self.sendj(400,{'error':'peer supplied an invalid chain'});return
+                if len(remote_chain)>len(self.chain.blocks):
+                    self.chain.replace(remote_chain)
                 if peer not in self.peers:self.peers.append(peer)
-                try:self.chain.replace(get(peer+'/chain')['chain'])
-                except Exception:pass
                 self.sendj(200,{'ok':True,'peer':peer,'status':status})
             else:self.sendj(404,{'error':'not found'})
         except Exception as e:self.sendj(400,{'error':str(e)})
