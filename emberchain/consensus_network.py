@@ -30,9 +30,15 @@ class ConsensusHTTPServer:
                     or parsed.username or parsed.password or parsed.path not in ("", "/")
                     or parsed.query or parsed.fragment):
                 raise ValueError("invalid consensus peer URL")
+            try:
+                parsed.port
+            except ValueError:
+                raise ValueError("consensus peer URL has an invalid port")
             if parsed.scheme != "https" and parsed.hostname not in ("127.0.0.1", "localhost", "::1"):
                 raise ValueError("non-loopback consensus peers must use HTTPS")
-            self.peers.append(peer.rstrip("/"))
+            normalized_peer = peer.rstrip("/")
+            if normalized_peer not in self.peers:
+                self.peers.append(normalized_peer)
         self.on_finalized = on_finalized
         self.seen = set()
         self.seen_order = deque()
@@ -137,10 +143,14 @@ class ConsensusHTTPServer:
                 if key_mode & 0o077:
                     self.server.server_close()
                     raise ValueError("consensus TLS private key must have permissions 0600")
-            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            context.minimum_version = ssl.TLSVersion.TLSv1_2
-            context.load_cert_chain(tls_certfile, tls_keyfile)
-            self.server.socket = context.wrap_socket(self.server.socket, server_side=True)
+            try:
+                context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                context.minimum_version = ssl.TLSVersion.TLSv1_2
+                context.load_cert_chain(tls_certfile, tls_keyfile)
+                self.server.socket = context.wrap_socket(self.server.socket, server_side=True)
+            except Exception:
+                self.server.server_close()
+                raise
 
     def publish_proposal(self, proposal, block):
         """Validate a locally-created proposal and relay it to configured peers."""
