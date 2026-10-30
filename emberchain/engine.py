@@ -16,7 +16,7 @@ from signer import ConsensusSigner
 
 
 class ConsensusEngine:
-    def __init__(self, signer: ConsensusSigner, block_validator):
+    def __init__(self, signer: ConsensusSigner, block_validator, on_finalized=None):
         if not isinstance(signer, ConsensusSigner):
             raise TypeError("signer must be a ConsensusSigner")
         if not callable(block_validator):
@@ -29,6 +29,9 @@ class ConsensusEngine:
         ]
         self.total_power = sum(signer.validators.values())
         self.block_validator = block_validator
+        if on_finalized is not None and not callable(on_finalized):
+            raise TypeError("on_finalized must be callable")
+        self.on_finalized = on_finalized
         self.round = 0
         self.proposals = {}
         self.votes = defaultdict(dict)
@@ -102,10 +105,6 @@ class ConsensusEngine:
         block = self.proposals.get(block_hash)
         if block is None:
             return None
-        try:
-            self.signer.finalize(matching, self.round, block_hash)
-        except ValueError:
-            return None
         result = {
             "height": vote["height"],
             "round": self.round,
@@ -113,6 +112,18 @@ class ConsensusEngine:
             "block": block,
             "commit_votes": matching,
         }
+        # Persist the finalized block before advancing the signer height. If the
+        # process crashes between these writes, startup can verify and catch up
+        # from the committed chain without losing anti-equivocation history.
+        if self.on_finalized is not None:
+            try:
+                self.on_finalized(result)
+            except Exception:
+                return None
+        try:
+            self.signer.finalize(matching, self.round, block_hash)
+        except ValueError:
+            return None
         self.finalized[result["height"]] = result
         self.round = 0
         self.proposals.clear()
