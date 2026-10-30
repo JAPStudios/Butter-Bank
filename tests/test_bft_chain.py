@@ -378,6 +378,15 @@ class BFTChainTests(unittest.TestCase):
                 for thread in threads:
                     thread.join(timeout=2)
 
+    def test_bft_node_rejects_symlinked_validator_private_key(self):
+        with tempfile.TemporaryDirectory() as directory:
+            real = Path(directory) / "real.key"
+            link = Path(directory) / "linked.key"
+            generate_keypair(real)
+            link.symlink_to(real)
+            with self.assertRaisesRegex(ValueError, "non-symlink"):
+                load_validator_key(link)
+
 
 if __name__ == "__main__":
     unittest.main()
