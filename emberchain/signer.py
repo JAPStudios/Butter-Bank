@@ -11,7 +11,7 @@ import tempfile
 import threading
 from pathlib import Path
 
-from consensus import make_vote, normalize_validator_set, validator_set_hash, verify_vote, verify_commit_certificate, _is_hex
+from consensus import (make_vote, make_round_change, normalize_validator_set, validator_set_hash, verify_vote, verify_round_change, verify_round_change_certificate, verify_commit_certificate, _is_hex)
 
 
 def _synchronized(method):
@@ -89,6 +89,21 @@ class ConsensusSigner:
                 raise ValueError("invalid persisted consensus height")
             if not isinstance(self.state.get("signed"), dict):
                 raise ValueError("invalid persisted signing history")
+            self.state.setdefault("signed_round_changes", {})
+            if not isinstance(self.state["signed_round_changes"], dict):
+                raise ValueError("invalid persisted round-change history")
+            validator_records = [
+                {"public_key": key, "voting_power": power}
+                for key, power in self.validators.items()
+            ]
+            for slot, message in self.state["signed_round_changes"].items():
+                if (not isinstance(slot, str) or not slot.isdigit()
+                        or int(slot) < 1 or not isinstance(message, dict)
+                        or not verify_round_change(message, validator_records, chain_id)
+                        or message.get("validator") != self.public_key
+                        or message.get("height") != height
+                        or message.get("round") != int(slot)):
+                    raise ValueError("persisted round-change record failed signature validation")
             if "round" not in self.state:
                 self.state["round"] = 0
             if (not isinstance(self.state["round"], int) or isinstance(self.state["round"], bool)
@@ -138,7 +153,7 @@ class ConsensusSigner:
         else:
             self.state = {"chain_id": chain_id, "validator_set_hash": self.validators_hash,
                           "public_key": self.public_key, "height": initial_height,
-                          "round": 0, "lock": None, "locked_round": None, "signed": {}}
+                          "round": 0, "lock": None, "locked_round": None, "signed": {}, "signed_round_changes": {}}
             self._save()
 
     def close(self):
@@ -180,10 +195,45 @@ class ConsensusSigner:
             return self.state["lock"]
 
     @_synchronized
-    def advance_round(self):
-        self.state["round"] += 1
+    def sign_round_change(self, target_round):
+        """Persist a signed request for a later round; locked validators refuse."""
+        if (not isinstance(target_round, int) or isinstance(target_round, bool)
+                or target_round <= self.current_round):
+            raise ValueError("target_round must be greater than the current round")
+        if self.state["lock"] is not None:
+            raise RuntimeError("locked validator cannot request an unlocked round change")
+        slot = str(target_round)
+        prior = self.state["signed_round_changes"].get(slot)
+        if prior is not None:
+            return prior
+        message = make_round_change(
+            self.key, self.chain_id, self.height, target_round, self.validators_hash
+        )
+        self.state["signed_round_changes"][slot] = message
         self._save()
-        return self.state["round"]
+        return message
+
+    @_synchronized
+    def advance_round(self, certificate):
+        """Advance only on a verified >2/3 certificate while remaining unlocked."""
+        if self.state["lock"] is not None:
+            raise RuntimeError("locked validator cannot advance without lock-recovery proof")
+        if not isinstance(certificate, (list, tuple)) or not certificate:
+            raise ValueError("round-change certificate is required")
+        target = certificate[0].get("round") if isinstance(certificate[0], dict) else None
+        records = [
+            {"public_key": key, "voting_power": power}
+            for key, power in self.validators.items()
+        ]
+        if (not isinstance(target, int) or isinstance(target, bool)
+                or target <= self.current_round
+                or not verify_round_change_certificate(
+                    certificate, records, self.chain_id, self.height, target
+                )):
+            raise ValueError("invalid or insufficient round-change certificate")
+        self.state["round"] = target
+        self._save()
+        return target
 
     def _save(self):
         data = json.dumps(self.state, sort_keys=True, separators=(",", ":")).encode()
