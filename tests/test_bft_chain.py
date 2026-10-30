@@ -207,6 +207,27 @@ class BFTChainTests(unittest.TestCase):
             loaded = load_validator_key(path)
             self.assertEqual(loaded.public_key().public_bytes_raw().hex(), expected_public)
 
+    def test_failed_bft_persistence_rolls_back_in_memory_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            chain = BFTChain(self.cfg, Path(directory) / "chain.json")
+            block = chain.build_proposal(chain.validators[0]["public_key"])
+            set_hash = validator_set_hash(chain.validators)
+            keys_by_public = {
+                key.public_key().public_bytes_raw().hex(): key
+                for key in self.validator_keys
+            }
+            votes = [
+                make_vote(keys_by_public[item["public_key"]], self.chain_id, 1, 0,
+                          "precommit", block["hash"], set_hash)
+                for item in chain.validators[:3]
+            ]
+            original_save = chain.save
+            chain.save = lambda: (_ for _ in ()).throw(OSError("simulated disk failure"))
+            with self.assertRaises(OSError):
+                chain.accept_finalized_block(block, 0, votes)
+            self.assertEqual(len(chain.blocks), 1)
+            chain.save = original_save
+
 
 if __name__ == "__main__":
     unittest.main()
