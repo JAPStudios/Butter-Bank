@@ -18,6 +18,9 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 )
 
 STEPS = frozenset({"prevote", "precommit"})
+# A 32-bit round counter is ample for any practical deployment and keeps
+# untrusted consensus messages and persisted counters strictly bounded.
+MAX_ROUND = (1 << 32) - 1
 
 
 def canonical_json(value: object) -> bytes:
@@ -74,8 +77,8 @@ def select_proposer(
     normalized = normalize_validator_set(validators)
     if not isinstance(height, int) or isinstance(height, bool) or height < 1:
         raise ValueError("height must be a positive integer")
-    if not isinstance(round_number, int) or isinstance(round_number, bool) or round_number < 0:
-        raise ValueError("round_number must be a non-negative integer")
+    if not isinstance(round_number, int) or isinstance(round_number, bool) or round_number < 0 or round_number > MAX_ROUND:
+        raise ValueError("round_number must be a 32-bit non-negative integer")
     total = sum(normalized.values())
     seed = hashlib.sha256(f"biscuits-proposer:{height}:{round_number}".encode()).digest()
     slot = int.from_bytes(seed, "big") % total
@@ -248,8 +251,8 @@ def round_change_signing_bytes(chain_id: str, height: int, round_number: int,
     if not isinstance(height, int) or isinstance(height, bool) or height < 1:
         raise ValueError("height must be positive")
     if (not isinstance(round_number, int) or isinstance(round_number, bool)
-            or round_number < 1):
-        raise ValueError("round_number must be positive")
+            or round_number < 1 or round_number > MAX_ROUND):
+        raise ValueError("round_number must be a positive 32-bit integer")
     if not _is_hex(validators_hash, 32):
         raise ValueError("validators_hash must be 32-byte hex")
     return canonical_json({
@@ -318,7 +321,7 @@ def verify_round_change_certificate(messages: Sequence[Mapping[str, object]],
     try:
         if (not isinstance(height, int) or isinstance(height, bool) or height < 1
                 or not isinstance(round_number, int) or isinstance(round_number, bool)
-                or round_number < 1
+                or round_number < 1 or round_number > MAX_ROUND
                 or not isinstance(messages, Sequence)
                 or isinstance(messages, (str, bytes))):
             return False
@@ -352,7 +355,8 @@ def verify_commit_certificate(
     try:
         if (not isinstance(height, int) or isinstance(height, bool) or height < 1
                 or not isinstance(round_number, int) or isinstance(round_number, bool)
-                or round_number < 0 or not _is_hex(block_hash, 32)):
+                or round_number < 0 or round_number > MAX_ROUND
+                or not _is_hex(block_hash, 32)):
             return False
         if not isinstance(votes, Sequence) or isinstance(votes, (str, bytes)):
             return False
