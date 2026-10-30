@@ -215,8 +215,8 @@ class ConsensusEngine:
         """Advance only from a valid distributed certificate; never unlock locally."""
         if certificate is None:
             raise RuntimeError("a >2/3 signed round-change certificate is required")
-        target = certificate[0].get("round") if certificate and isinstance(certificate[0], dict) else None
         self.round = self.signer.advance_round(certificate)
         self.proposals.clear()
         self.votes.clear()
+        self.round_changes.clear()
         return self.round
