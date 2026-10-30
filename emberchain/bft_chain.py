@@ -3,6 +3,7 @@ import time
 import json
 import os
 import tempfile
+from pathlib import Path
 from urllib.parse import urlparse
 from node import Chain, bhash, canon, sha, MAX_TXS
 from consensus import verify_commit_certificate, validator_set_hash
