@@ -16,7 +16,7 @@ This crate is the Rust implementation of Milkchain's deterministic account ledge
 From this directory:
 
 ```sh
-cargo test --locked
+cargo test
 ```
 
 ## Protocol scope
