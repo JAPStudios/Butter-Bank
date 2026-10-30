@@ -337,6 +337,19 @@ class BFTPrimitiveTests(unittest.TestCase):
                 self.assertIn(("0", "prevote"), {
                     (str(key[0]), key[1]) for key in engine.votes
                 })
+                server.publish_round_change(1)
+                for key, _ in self.keys_and_records[1:3]:
+                    round_change = make_round_change(
+                        key, self.chain_id, 1, 1, self.set_hash
+                    )
+                    payload = json.dumps({"round_change": round_change}).encode()
+                    request = urllib.request.Request(
+                        url + "/consensus/round-change", data=payload,
+                        headers={"Content-Type": "application/json"}, method="POST"
+                    )
+                    with urllib.request.urlopen(request, timeout=2) as response:
+                        self.assertEqual(response.status, 200)
+                self.assertEqual(engine.round, 1)
             finally:
                 server.shutdown()
                 thread.join(timeout=2)
