@@ -409,6 +409,16 @@ class BFTPrimitiveTests(unittest.TestCase):
                 list(executor.map(lambda _: engine.receive_vote(vote), range(32)))
             self.assertEqual(len(engine.votes[(0, "prevote")]), 1)
 
+    def test_consensus_transport_requires_tls_on_public_listener(self):
+        with tempfile.TemporaryDirectory() as directory:
+            signer = ConsensusSigner(
+                self.keys_and_records[0][0], self.chain_id, self.validators,
+                Path(directory) / "signer.json"
+            )
+            engine = ConsensusEngine(signer, lambda block: block.get("hash"))
+            with self.assertRaises(ValueError):
+                ConsensusHTTPServer(engine, host="0.0.0.0", port=0)
+
 
 if __name__ == "__main__":
     unittest.main()
