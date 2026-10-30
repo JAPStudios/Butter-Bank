@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   assemble:
@@ -13,12 +14,12 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
       - uses: android-actions/setup-android@v4
         with:
-          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+          packages: "platform-tools platforms;android-35 build-tools;35.0.0"
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
-      - name: Build debug APK
-        run: gradle assembleDebug
+          gradle-version: "8.9"
+      - name: Build debug APK and run unit tests
+        run: gradle assembleDebug testDebugUnitTest
