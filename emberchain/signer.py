@@ -1,6 +1,7 @@
 """Persistent anti-equivocation and conservative locking for BFT validators."""
 import json
 import os
+import stat
 import tempfile
 import threading
 from pathlib import Path
@@ -31,8 +32,15 @@ class ConsensusSigner:
         self.validators_hash = validator_set_hash(validators)
         self.path = Path(state_path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        if self.path.is_symlink():
+            raise ValueError("validator state file must not be a symbolic link")
         if self.path.exists():
-            self.state = json.loads(self.path.read_text())
+            metadata = self.path.stat()
+            if not stat.S_ISREG(metadata.st_mode):
+                raise ValueError("validator state path must be a regular file")
+            if metadata.st_mode & 0o077:
+                raise ValueError("validator state file must have permissions 0600")
+            self.state = json.loads(self.path.read_text(encoding="utf-8"))
             if (not isinstance(self.state, dict)
                     or self.state.get("chain_id") != chain_id
                     or self.state.get("validator_set_hash") != self.validators_hash
