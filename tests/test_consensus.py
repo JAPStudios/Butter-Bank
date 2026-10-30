@@ -298,6 +298,51 @@ class BFTPrimitiveTests(unittest.TestCase):
                 reopened.sign_vote(0, "prevote", self.block_hash)
             reopened.sign_vote(1, "prevote", self.block_hash)
 
+    def test_commit_retries_after_transient_chain_persistence_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            signer = ConsensusSigner(
+                self.keys_and_records[0][0], self.chain_id, self.validators,
+                Path(directory) / "signer.json"
+            )
+            calls = []
+            def persist(result):
+                calls.append(result["block_hash"])
+                if len(calls) == 1:
+                    raise OSError("temporary disk failure")
+            engine = ConsensusEngine(
+                signer, lambda block: block.get("hash"), on_finalized=persist
+            )
+            proposer_key = next(
+                key for key, record in self.keys_and_records
+                if record["public_key"] == select_proposer(self.validators, 1, 0)
+            )
+            block = {"hash": self.block_hash}
+            proposal = make_proposal(proposer_key, self.chain_id, 1, 0,
+                                     self.block_hash, self.set_hash)
+            self.assertTrue(engine.receive_proposal(proposal, block))
+            local_prevote = engine.prevote(self.block_hash)
+            prevotes = [local_prevote] + [
+                make_vote(key, self.chain_id, 1, 0, "prevote",
+                          self.block_hash, self.set_hash)
+                for key, _ in self.keys_and_records[1:3]
+            ]
+            precommit = None
+            for vote in prevotes:
+                action = engine.receive_vote(vote)
+                if action is not None:
+                    precommit = action
+            precommits = [precommit] + [
+                make_vote(key, self.chain_id, 1, 0, "precommit",
+                          self.block_hash, self.set_hash)
+                for key, _ in self.keys_and_records[1:3]
+            ]
+            for vote in precommits:
+                engine.receive_vote(vote)
+            self.assertEqual(signer.height, 1)
+            self.assertIsNotNone(engine.retry_pending_finalization())
+            self.assertEqual(signer.height, 2)
+            self.assertEqual(len(calls), 2)
+
 
 if __name__ == "__main__":
     unittest.main()
