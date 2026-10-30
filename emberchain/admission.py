@@ -107,12 +107,15 @@ def validator_set_from_certificates(certificates, issuers, chain_id, current_epo
     """Build an equal-voting-power validator set from valid admission certificates."""
     if not isinstance(certificates, Sequence) or isinstance(certificates, (str, bytes)):
         raise ValueError("certificates must be a sequence")
+    issuer_keys = set(normalize_issuers(issuers))
     result = []
     seen = set()
     for certificate in certificates:
         if not verify_admission_certificate(certificate, issuers, chain_id, current_epoch):
             raise ValueError("invalid or expired validator admission certificate")
         key = certificate["validator_public_key"].lower()
+        if key in issuer_keys:
+            raise ValueError("credential issuers cannot also be validators")
         if key in seen:
             raise ValueError("duplicate admitted validator")
         seen.add(key)
