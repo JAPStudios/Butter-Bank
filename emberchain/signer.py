@@ -2,7 +2,11 @@
 import json
 import os
 import stat
-import fcntl
+try:
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None
+    import msvcrt
 import tempfile
 import threading
 from pathlib import Path
@@ -44,8 +48,14 @@ class ConsensusSigner:
         self._lock_fd = os.open(self.lock_path, lock_flags, 0o600)
         os.fchmod(self._lock_fd, 0o600)
         try:
-            fcntl.flock(self._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
+            if fcntl is not None:
+                fcntl.flock(self._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            else:
+                if os.fstat(self._lock_fd).st_size == 0:
+                    os.write(self._lock_fd, b"\\0")
+                os.lseek(self._lock_fd, 0, os.SEEK_SET)
+                msvcrt.locking(self._lock_fd, msvcrt.LK_NBLCK, 1)
+        except OSError:
             os.close(self._lock_fd)
             self._lock_fd = None
             raise RuntimeError("validator state is already in use by another process")
@@ -59,7 +69,7 @@ class ConsensusSigner:
                 self.close()
                 raise ValueError("validator state file cannot be opened safely") from exc
             metadata = os.fstat(state_fd)
-            if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077:
+            if not stat.S_ISREG(metadata.st_mode) or (os.name != "nt" and metadata.st_mode & 0o077):
                 os.close(state_fd)
                 self.close()
                 raise ValueError("validator state file must be a regular file with permissions 0600")
@@ -130,7 +140,11 @@ class ConsensusSigner:
     def close(self):
         """Release the exclusive process lock when this validator stops."""
         if getattr(self, "_lock_fd", None) is not None:
-            fcntl.flock(self._lock_fd, fcntl.LOCK_UN)
+            if fcntl is not None:
+                fcntl.flock(self._lock_fd, fcntl.LOCK_UN)
+            else:
+                os.lseek(self._lock_fd, 0, os.SEEK_SET)
+                msvcrt.locking(self._lock_fd, msvcrt.LK_UNLCK, 1)
             os.close(self._lock_fd)
             self._lock_fd = None
 
