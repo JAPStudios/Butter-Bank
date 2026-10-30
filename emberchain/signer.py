@@ -4,7 +4,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from consensus import make_vote, normalize_validator_set, validator_set_hash, verify_vote, verify_commit_certificate
+from consensus import make_vote, normalize_validator_set, validator_set_hash, verify_vote, verify_commit_certificate, _is_hex
 
 
 class ConsensusSigner:
@@ -40,8 +40,42 @@ class ConsensusSigner:
                     or self.state["round"] < 0):
                 raise ValueError("invalid persisted consensus round")
             lock = self.state.get("lock")
-            if lock is not None and (not isinstance(lock, str) or len(lock) != 64):
+            if lock is not None and not _is_hex(lock, 32):
                 raise ValueError("invalid persisted lock")
+            locked_round = self.state.get("locked_round")
+            if lock is None and locked_round is not None:
+                raise ValueError("persisted lock round exists without a lock")
+            if lock is not None and (
+                not isinstance(locked_round, int) or isinstance(locked_round, bool)
+                or locked_round < 0
+            ):
+                raise ValueError("invalid persisted lock round")
+            for slot, entry in self.state["signed"].items():
+                if not isinstance(slot, str) or not isinstance(entry, dict):
+                    raise ValueError("invalid persisted signing record")
+                parts = slot.split(":")
+                if len(parts) != 3:
+                    raise ValueError("invalid persisted signing slot")
+                try:
+                    signed_height, signed_round = int(parts[0]), int(parts[1])
+                except ValueError:
+                    raise ValueError("invalid persisted signing slot")
+                if (signed_height < 1 or signed_round < 0
+                        or parts[2] not in ("prevote", "precommit")
+                        or not _is_hex(entry.get("block_hash"), 32)
+                        or not isinstance(entry.get("vote"), dict)):
+                    raise ValueError("invalid persisted signing record")
+                vote = entry["vote"]
+                if (not verify_vote(vote, [
+                        {"public_key": key, "voting_power": power}
+                        for key, power in self.validators.items()
+                    ], chain_id)
+                        or vote.get("validator") != self.public_key
+                        or vote.get("height") != signed_height
+                        or vote.get("round") != signed_round
+                        or vote.get("step") != parts[2]
+                        or vote.get("block_hash") != entry["block_hash"]):
+                    raise ValueError("persisted signing record failed signature validation")
         else:
             self.state = {"chain_id": chain_id, "validator_set_hash": self.validators_hash,
                           "public_key": self.public_key, "height": initial_height,
