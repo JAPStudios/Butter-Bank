@@ -96,8 +96,8 @@ def proposal_signing_bytes(
         raise ValueError("chain_id must be non-empty")
     if not isinstance(height, int) or isinstance(height, bool) or height < 1:
         raise ValueError("height must be positive")
-    if not isinstance(round_number, int) or isinstance(round_number, bool) or round_number < 0:
-        raise ValueError("round_number must be non-negative")
+    if not isinstance(round_number, int) or isinstance(round_number, bool) or round_number < 0 or round_number > MAX_ROUND:
+        raise ValueError("round_number must be a 32-bit non-negative integer")
     if not _is_hex(block_hash, 32) or not _is_hex(validators_hash, 32):
         raise ValueError("block_hash and validators_hash must be 32-byte hex")
     return canonical_json({
