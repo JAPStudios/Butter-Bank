@@ -6,6 +6,8 @@ signatures; transport encryption and peer admission remain deployment concerns.
 import hashlib
 from collections import deque
 import json
+import os
+import stat
 import ssl
 import threading
 import urllib.request
@@ -130,6 +132,11 @@ class ConsensusHTTPServer:
             self.server.server_close()
             raise ValueError("both TLS certificate and private key are required")
         if tls_certfile:
+            if hasattr(os, "getuid"):
+                key_mode = stat.S_IMODE(os.stat(tls_keyfile).st_mode)
+                if key_mode & 0o077:
+                    self.server.server_close()
+                    raise ValueError("consensus TLS private key must have permissions 0600")
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             context.minimum_version = ssl.TLSVersion.TLSv1_2
             context.load_cert_chain(tls_certfile, tls_keyfile)
