@@ -11,6 +11,14 @@ MAX_TXS=100
 def canon(x): return json.dumps(x,sort_keys=True,separators=(',',':')).encode()
 def sha(b): return hashlib.sha256(b).hexdigest()
 def bhash(b): return sha(canon({k:b[k] for k in ('height','previous_hash','timestamp','transactions','nonce')}))
+
+def block_work(difficulty):
+    # Current proof-of-work target requires N leading hexadecimal zeroes.
+    # Its expected work is 16**N, represented exactly as an integer.
+    return 1 << (4*difficulty)
+
+def chain_work(blocks,difficulty):
+    return sum(block_work(difficulty) for _ in blocks[1:])
 def ishex(s,n):
     try: return isinstance(s,str) and len(s)==2*n and len(bytes.fromhex(s))==n
     except (ValueError,TypeError): return False
@@ -26,6 +34,27 @@ def broadcast(peers,path,obj):
     for p in list(peers):
         try: post(p+path,obj)
         except Exception: pass
+
+def synchronize_peer(chain, peer):
+    """Fetch and validate a peer's chain; adopt it only if it has more work."""
+    try:
+        status=get(peer+'/status')
+        expected={'chain_id':chain.id,'genesis_hash':chain.blocks[0]['hash'],'difficulty':chain.diff,'block_reward':chain.reward}
+        if any(status.get(k)!=v for k,v in expected.items()):
+            return False
+        candidate=get(peer+'/chain').get('chain')
+        if not chain.valid_chain(candidate):
+            return False
+        return chain.replace(candidate)[0]
+    except Exception:
+        return False
+
+def peer_sync_loop(chain, interval=10):
+    """Periodically catch up with configured and discovered peers."""
+    while True:
+        for peer in list(chain.peers):
+            synchronize_peer(chain, peer)
+        time.sleep(interval)
 
 class Chain:
     def genesis_block(self):
@@ -162,10 +191,21 @@ class Chain:
     def replace(self,bs):
         with self.lock:
             if not self.valid_chain(bs):return False,'candidate chain invalid'
-            if len(bs)<=len(self.blocks):return False,'candidate has no greater cumulative work'
-            old_pool=list(self.pool); self.blocks=bs; self.pool=old_pool
+            if chain_work(bs,self.diff)<=chain_work(self.blocks,self.diff):return False,'candidate has no greater cumulative work'
+            # Transactions from blocks orphaned by this reorganization are not
+            # lost: return them to the mempool unless the new chain includes
+            # them or they are no longer valid against the replacement state.
             included={sha(canon(t)) for block in bs[1:] for t in block['transactions'][1:]}
-            self.pool=[t for t in self.pool if sha(canon(t)) not in included]
+            new_pool=list(self.pool)
+            for block in self.blocks[1:]:
+                for tx in block['transactions'][1:]:
+                    if sha(canon(tx)) not in included:
+                        new_pool.append(tx)
+            unique_pool={}
+            for tx in new_pool:
+                unique_pool[sha(canon(tx))]=tx
+            self.blocks=list(bs)
+            self.pool=[tx for tx in unique_pool.values() if sha(canon(tx)) not in included]
             self._revalidate_pool(); self.save(); return True,'replaced'
 
 class API(BaseHTTPRequestHandler):
@@ -211,6 +251,15 @@ class API(BaseHTTPRequestHandler):
                 ok,msg=self.chain.accept_block(d)
                 if ok: broadcast(self.peers,'/receive-block',d)
                 self.sendj(200 if ok else 400,{'ok':ok,'message':msg})
+            elif p=='/receive-chain':
+                candidate=d.get('chain')
+                if not isinstance(candidate,list):
+                    self.sendj(400,{'ok':False,'message':'chain must be a list'});return
+                ok,msg=self.chain.replace(candidate)
+                if ok:
+                    with self.chain.lock: accepted_chain=list(self.chain.blocks)
+                    broadcast(self.peers,'/receive-chain',{'chain':accepted_chain})
+                self.sendj(200 if ok else 400,{'ok':ok,'message':msg})
             elif p=='/connect':
                 raw_peer=d.get('peer')
                 if not isinstance(raw_peer,str): self.sendj(400,{'error':'peer must be an HTTP(S) URL'});return
@@ -243,6 +292,7 @@ def main():
     if not cp.exists():raise SystemExit('Config missing. Copy config.example.json to config.json and configure it.')
     cfg=json.loads(cp.read_text()); c=Chain(cfg,a.data or f"data-{cfg.get('port',8333)}.json")
     API.chain=c;API.peers=c.peers
+    threading.Thread(target=peer_sync_loop,args=(c,),daemon=True).start()
     srv=ThreadingHTTPServer((cfg.get('host','127.0.0.1'),int(cfg.get('port',8333))),API)
     print(f"Emberchain node on {cfg.get('host')}:{cfg.get('port')} | chain={c.id} | height={len(c.blocks)-1}")
     try:srv.serve_forever()

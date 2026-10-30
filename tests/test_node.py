@@ -1,11 +1,15 @@
+import json
 import tempfile
+import threading
 import unittest
+import urllib.request
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives import serialization
 
-from node import Chain, bhash, canon, signing_bytes
+from node import API, Chain, bhash, canon, signing_bytes, synchronize_peer
 
 
 def wallet():
@@ -140,6 +144,109 @@ class ChainValidationTests(unittest.TestCase):
         remote.mine(second_miner)
         self.assertTrue(self.chain.replace(remote.blocks)[0])
         self.assertEqual(len(self.chain.blocks), 3)
+
+
+
+    def test_chain_work_uses_proof_of_work_target(self):
+        from node import block_work, chain_work
+
+        self.assertEqual(block_work(1), 16)
+        self.assertEqual(block_work(2), 256)
+        _, _, miner = wallet()
+        self.chain.mine(miner)
+        self.assertEqual(chain_work(self.chain.blocks, self.chain.diff), 16)
+
+    def test_reorganization_returns_orphaned_transactions_to_mempool(self):
+        sender_key, _, sender = wallet()
+        _, _, recipient = wallet()
+        self.cfg["genesis_allocations"] = {sender: 1000}
+        self.path = Path(self.temp.name) / "reorg-local.json"
+        self.chain = Chain(self.cfg, self.path)
+        tx = {
+            "chain_id": self.cfg["chain_id"],
+            "sender": sender,
+            "recipient": recipient,
+            "amount": 125,
+            "fee": 3,
+            "nonce": 1,
+        }
+        tx["signature"] = sender_key.sign(signing_bytes(tx)).hex()
+        self.assertTrue(self.chain.add_tx(tx)[0])
+        local_block, message = self.chain.mine(sender)
+        self.assertEqual(message, "mined")
+        self.assertIn(tx, local_block["transactions"])
+
+        remote = Chain(self.cfg, Path(self.temp.name) / "reorg-remote.json")
+        _, _, remote_miner = wallet()
+        remote.mine(remote_miner)
+        remote.mine(remote_miner)
+        self.assertTrue(self.chain.replace(remote.blocks)[0])
+        self.assertEqual(self.chain.blocks, remote.blocks)
+        self.assertIn(tx, self.chain.pool)
+        balances, nonces = self.chain.state()
+        self.assertEqual(balances[sender], 1000)
+        self.assertEqual(nonces[sender], 0)
+
+    def test_peer_sync_fetches_and_adopts_longer_chain(self):
+        _, _, miner = wallet()
+        remote = Chain(self.cfg, Path(self.temp.name) / "remote-periodic.json")
+        remote.mine(miner)
+        API.chain = remote
+        API.peers = []
+        server = ThreadingHTTPServer(("127.0.0.1", 0), API)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.shutdown)
+        self.addCleanup(server.server_close)
+        self.addCleanup(thread.join, 2)
+
+        peer = f"http://127.0.0.1:{server.server_port}"
+        self.assertTrue(synchronize_peer(self.chain, peer))
+        self.assertEqual(self.chain.blocks, remote.blocks)
+
+    def test_peer_sync_rejects_different_network(self):
+        other_cfg = dict(self.cfg, chain_id="different-chain")
+        remote = Chain(other_cfg, Path(self.temp.name) / "other-network.json")
+        API.chain = remote
+        API.peers = []
+        server = ThreadingHTTPServer(("127.0.0.1", 0), API)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.shutdown)
+        self.addCleanup(server.server_close)
+        self.addCleanup(thread.join, 2)
+
+        peer = f"http://127.0.0.1:{server.server_port}"
+        self.assertFalse(synchronize_peer(self.chain, peer))
+        self.assertEqual(len(self.chain.blocks), 1)
+
+    def test_receive_chain_endpoint_synchronizes_a_longer_fork(self):
+        _, _, first_miner = wallet()
+        _, _, second_miner = wallet()
+        remote = Chain(self.cfg, Path(self.temp.name) / "remote-sync.json")
+        remote.mine(first_miner)
+        remote.mine(second_miner)
+
+        API.chain = self.chain
+        API.peers = []
+        server = ThreadingHTTPServer(("127.0.0.1", 0), API)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(thread.join, 2)
+        self.addCleanup(server.shutdown)
+
+        payload = json.dumps({"chain": remote.blocks}).encode()
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_port}/receive-chain",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=3) as response:
+            result = json.loads(response.read())
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(self.chain.blocks, remote.blocks)
 
 
 if __name__ == "__main__":
