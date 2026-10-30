@@ -668,9 +668,10 @@ class BFTRoundTimeoutLoopTests(unittest.TestCase):
         pending_round_change_targets = (4, 7)
 
     class FakeEngine:
-        height = 3
-        round = 1
-        signer = FakeSigner()
+        def __init__(self):
+            self.height = 3
+            self.round = 1
+            self.signer = BFTRoundTimeoutLoopTests.FakeSigner()
 
     class FakeServer:
         def __init__(self):
