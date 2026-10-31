@@ -7,6 +7,8 @@ from urllib.parse import urlparse, parse_qs
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 MAX_TXS=100
+MAX_TX_BYTES=4096
+MAX_MEMPOOL_TXS=900
 
 def canon(x): return json.dumps(x,sort_keys=True,separators=(',',':')).encode()
 def sha(b): return hashlib.sha256(b).hexdigest()
@@ -127,7 +129,9 @@ class Chain:
             stored_peers=d.get('peers',[])
             if not isinstance(stored_peers,list) or any(not isinstance(p,str) for p in stored_peers): raise ValueError('stored peer list is invalid')
             self.peers=list(dict.fromkeys([p.rstrip('/') for p in stored_peers if p.strip()]+self.peers))
-            if not isinstance(self.pool,list) or not self.valid_chain(self.blocks): raise ValueError('stored chain or mempool is invalid')
+            if (not isinstance(self.pool,list) or len(self.pool)>MAX_MEMPOOL_TXS
+                    or not self.valid_chain(self.blocks)):
+                raise ValueError('stored chain or mempool is invalid or exceeds the mempool limit')
             self._revalidate_pool()
         else:
             self.blocks=[self.genesis_block()]; self.pool=[]; self.save()
@@ -151,6 +155,11 @@ class Chain:
             nonce.setdefault(cb['recipient'],0)
         return bal,nonce
     def check_tx(self,tx,bal,nonces):
+        if not isinstance(tx,dict): return False,'transaction must be a JSON object'
+        try:
+            if len(canon(tx))>MAX_TX_BYTES: return False,'transaction exceeds serialized size limit'
+        except (TypeError,ValueError,OverflowError):
+            return False,'transaction cannot be canonically encoded'
         fields={'chain_id','sender','recipient','amount','fee','nonce','signature'}
         if not isinstance(tx,dict) or set(tx)!=fields: return False,'wrong transaction fields'
         if tx['chain_id']!=self.id: return False,'wrong chain_id'
@@ -199,7 +208,10 @@ class Chain:
             return True
         except (KeyError,TypeError,ValueError,OverflowError): return False
     def add_tx(self,tx):
+        if not isinstance(tx,dict): return False,'transaction must be a JSON object'
         with self.lock:
+            if len(self.pool)>=MAX_MEMPOOL_TXS:
+                return False,'mempool is full'
             bal,nonces=self.state()
             for q in sorted([x for x in self.pool if x['sender']==tx.get('sender')],key=lambda x:x['nonce']):
                 bal[q['sender']]-=q['amount']+q['fee']; bal[q['recipient']]=bal.get(q['recipient'],0)+q['amount']; nonces[q['sender']]=q['nonce']; nonces.setdefault(q['recipient'],0)

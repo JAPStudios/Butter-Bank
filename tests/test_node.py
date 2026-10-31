@@ -364,3 +364,56 @@ class ChainPaginationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MempoolBoundTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.path = Path(self.temp.name) / "bounded-mempool.json"
+        self.key, _, self.sender = wallet()
+        _, _, self.recipient = wallet()
+        self.cfg = {
+            "chain_id": "mempool-bound-test",
+            "difficulty": 1,
+            "block_reward": 0,
+            "genesis_allocations": {self.sender: 100000},
+        }
+        self.chain = Chain(self.cfg, self.path)
+
+    def make_tx(self, nonce=1, **extra):
+        tx = {
+            "chain_id": self.cfg["chain_id"],
+            "sender": self.sender,
+            "recipient": self.recipient,
+            "amount": 1,
+            "fee": 0,
+            "nonce": nonce,
+        }
+        tx.update(extra)
+        tx["signature"] = self.key.sign(signing_bytes(tx)).hex()
+        return tx
+
+    def test_rejects_non_object_transaction_without_exception(self):
+        self.assertEqual(self.chain.add_tx([]), (False, "transaction must be a JSON object"))
+        self.assertEqual(self.chain.add_tx(None), (False, "transaction must be a JSON object"))
+
+    def test_rejects_transaction_over_serialized_size_limit(self):
+        tx = self.make_tx()
+        tx["chain_id"] = "x" * 5000
+        self.assertEqual(
+            self.chain.add_tx(tx),
+            (False, "transaction exceeds serialized size limit"),
+        )
+
+    def test_mempool_has_a_hard_transaction_count_limit(self):
+        with patch("node.MAX_MEMPOOL_TXS", 1):
+            self.assertEqual(self.chain.add_tx(self.make_tx(1)), (True, "accepted"))
+            self.assertEqual(self.chain.add_tx(self.make_tx(2)), (False, "mempool is full"))
+
+    def test_restart_rejects_persisted_mempool_over_limit(self):
+        self.chain.pool = [self.make_tx(1), self.make_tx(2)]
+        self.chain.save()
+        with patch("node.MAX_MEMPOOL_TXS", 1):
+            with self.assertRaisesRegex(ValueError, "mempool limit"):
+                Chain(self.cfg, self.path)
