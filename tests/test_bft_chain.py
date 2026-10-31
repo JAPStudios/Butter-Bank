@@ -116,7 +116,7 @@ class BFTChainTests(unittest.TestCase):
     def test_bft_chain_rejects_inherited_uncoordinated_block_acceptance(self):
         with tempfile.TemporaryDirectory() as directory:
             chain = BFTChain(self.cfg, Path(directory) / "chain.json")
-            block = chain.build_proposal(chain.validators[0]["public_key"])
+            block = chain.build_proposal(select_proposer(chain.validators, len(chain.blocks), 0))
             ok, message = chain.accept_block(block)
             self.assertFalse(ok)
             self.assertIn("consensus finality", message)
@@ -297,7 +297,7 @@ class BFTChainTests(unittest.TestCase):
                 self.validator_keys[0], self.chain_id, chain.validators,
                 Path(directory) / "offline-signer.json", initial_height=1
             )
-            block = chain.build_proposal(chain.validators[0]["public_key"])
+            block = chain.build_proposal(select_proposer(chain.validators, len(chain.blocks), 0))
             set_hash = validator_set_hash(chain.validators)
             keys_by_public = {
                 key.public_key().public_bytes_raw().hex(): key
@@ -328,7 +328,7 @@ class BFTChainTests(unittest.TestCase):
             ]
             signer.lock_from_prevotes(conflicting_prevotes, 0, conflicting_hash)
             signer.sign_vote(0, "precommit", conflicting_hash)
-            block = chain.build_proposal(chain.validators[0]["public_key"])
+            block = chain.build_proposal(select_proposer(chain.validators, len(chain.blocks), 0))
             set_hash = validator_set_hash(chain.validators)
             keys_by_public = {
                 key.public_key().public_bytes_raw().hex(): key
@@ -353,7 +353,7 @@ class BFTChainTests(unittest.TestCase):
     def test_failed_bft_persistence_rolls_back_in_memory_state(self):
         with tempfile.TemporaryDirectory() as directory:
             chain = BFTChain(self.cfg, Path(directory) / "chain.json")
-            block = chain.build_proposal(chain.validators[0]["public_key"])
+            block = chain.build_proposal(select_proposer(chain.validators, len(chain.blocks), 0))
             set_hash = validator_set_hash(chain.validators)
             keys_by_public = {
                 key.public_key().public_bytes_raw().hex(): key
