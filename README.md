@@ -43,7 +43,7 @@ PYTHONPATH=emberchain python -m keygen --output validator.key
 
 The example configuration contains placeholders and cannot start a network until the issuer federation, admission certificates, validator keys, and peer/TLS settings are configured. The admission design requires at least four independent credential issuers and at least four admitted validators; issuers must enforce one credential per eligible participant off-chain.
 
-BFT mode is an integrated development prototype, not production consensus. Signed round-change messages, quorum certificates, network relay, and bounded inactivity-triggered timeout requests are implemented, but safe locked-round unlock and valid-round proofs remain outstanding. Validator-set changes and revocation activation, hardware-backed anti-rollback, formal verification, independent security audit, adversarial partition testing, and production recovery exercises also remain outstanding. Do not use real funds or expose the node APIs publicly without additional security controls.
+BFT mode is an integrated development prototype, not production consensus. Signed round-change messages and certificate-gated valid-round recovery are implemented in the development branch. Validator-set changes and revocation activation, hardware-backed anti-rollback, formal verification, independent security audit, adversarial partition testing, and production recovery exercises remain outstanding. Do not use real funds or expose the node APIs publicly without additional security controls.
 
 ## Security and scope
 
