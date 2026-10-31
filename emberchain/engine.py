@@ -39,6 +39,7 @@ class ConsensusEngine:
         self.on_finalized = on_finalized
         self.round = signer.current_round
         self.proposals = {}
+        self.proposal_metadata = {}
         self.votes = defaultdict(dict)
         self.round_changes = defaultdict(dict)
         self.finalized = {}
@@ -73,6 +74,10 @@ class ConsensusEngine:
             except (ValueError, RuntimeError):
                 return False
         self.proposals[proposal["block_hash"]] = block
+        self.proposal_metadata[proposal["block_hash"]] = {
+            "valid_round": proposal["valid_round"],
+            "valid_round_certificate": proposal["valid_round_certificate"],
+        }
         return True
 
     @_synchronized
@@ -138,6 +143,9 @@ class ConsensusEngine:
                 "block_hash": block_hash,
                 "block": block,
                 "commit_votes": matching,
+                **self.proposal_metadata.get(block_hash, {
+                    "valid_round": None, "valid_round_certificate": []
+                }),
             }
             # Ensure signer state can accept this commit before persisting the chain.
             try:
@@ -157,6 +165,7 @@ class ConsensusEngine:
             self.finalized[result["height"]] = result
             self.round = 0
             self.proposals.clear()
+            self.proposal_metadata.clear()
             self.votes.clear()
             self.round_changes.clear()
             return result
@@ -170,6 +179,7 @@ class ConsensusEngine:
         self.signer.catch_up(chain_blocks[self.signer.height:])
         self.round = self.signer.current_round
         self.proposals.clear()
+        self.proposal_metadata.clear()
         self.votes.clear()
         self.round_changes.clear()
         return True
