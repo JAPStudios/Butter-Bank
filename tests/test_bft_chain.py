@@ -159,6 +159,94 @@ class BFTChainTests(unittest.TestCase):
                 for thread in threads:
                     thread.join(timeout=2)
 
+    def test_four_locked_validators_recover_through_valid_round_proposal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            chains, signers, servers, threads = [], [], [], []
+            validators = [
+                {"public_key": key.public_key().public_bytes_raw().hex(),
+                 "voting_power": 1}
+                for key in self.validator_keys
+            ]
+            set_hash = validator_set_hash(validators)
+            old_hash = "ab" * 32
+            old_certificate = [
+                make_vote(key, self.chain_id, 1, 0, "prevote",
+                          old_hash, set_hash)
+                for key in self.validator_keys[:3]
+            ]
+            round_changes = []
+            for index, key in enumerate(self.validator_keys):
+                chain = BFTChain(self.cfg, Path(directory) / f"recovery-chain-{index}.json")
+                signer = ConsensusSigner(
+                    key, self.chain_id, chain.validators,
+                    Path(directory) / f"recovery-signer-{index}.json"
+                )
+                signer.lock_from_prevotes(old_certificate, 0, old_hash)
+                round_changes.append(signer.sign_round_change(2))
+                chains.append(chain)
+                signers.append(signer)
+            round_change_certificate = round_changes[:3]
+            for signer in signers:
+                self.assertEqual(signer.advance_round(round_change_certificate), 2)
+
+            for index, chain in enumerate(chains):
+                engine = ConsensusEngine(signers[index], chain.validate_proposal_block)
+
+                def persist(result, target=chain):
+                    ok, message = target.accept_finalized_block(
+                        result["block"], result["round"], result["commit_votes"]
+                    )
+                    if not ok:
+                        raise RuntimeError(message)
+
+                servers.append(ConsensusHTTPServer(
+                    engine, host="127.0.0.1", port=0, on_finalized=persist
+                ))
+            urls = [
+                "http://127.0.0.1:" + str(server.server.server_address[1])
+                for server in servers
+            ]
+            for index, server in enumerate(servers):
+                server.peers = [url for peer_index, url in enumerate(urls)
+                                if peer_index != index]
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                threads.append(thread)
+            try:
+                selected = select_proposer(chains[0].validators, 1, 2)
+                proposer_index = next(
+                    index for index, key in enumerate(self.validator_keys)
+                    if key.public_key().public_bytes_raw().hex() == selected
+                )
+                block = chains[proposer_index].build_proposal(selected)
+                valid_round_certificate = [
+                    make_vote(key, self.chain_id, 1, 1, "prevote",
+                              block["hash"], set_hash)
+                    for key in self.validator_keys[:3]
+                ]
+                proposal = make_proposal(
+                    self.validator_keys[proposer_index], self.chain_id, 1, 2,
+                    block["hash"], set_hash, 1, valid_round_certificate,
+                )
+                servers[proposer_index].publish_proposal(proposal, block)
+                deadline = time.time() + 10
+                while time.time() < deadline and any(len(chain.blocks) != 2 for chain in chains):
+                    time.sleep(0.05)
+                self.assertTrue(
+                    all(len(chain.blocks) == 2 for chain in chains),
+                    "all four locked validators should recover and finalize the same block",
+                )
+                self.assertEqual(len({chain.blocks[-1]["hash"] for chain in chains}), 1)
+                self.assertTrue(all(signer.locked_block_hash == block["hash"]
+                                    for signer in signers))
+            finally:
+                for server in servers:
+                    server.shutdown()
+                for thread in threads:
+                    thread.join(timeout=2)
+                for signer in signers:
+                    signer.close()
+
     def test_offline_signer_catches_up_from_verified_commit_certificates(self):
         with tempfile.TemporaryDirectory() as directory:
             chain = BFTChain(self.cfg, Path(directory) / "chain.json")
