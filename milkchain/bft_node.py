@@ -88,15 +88,38 @@ def load_validator_key(path):
     return Ed25519PrivateKey.from_private_bytes(seed)
 
 
-def bft_peer_sync_loop(chain, engine, interval=10):
-    while True:
+def bft_peer_sync_loop(chain, engine, interval=10, stop_event=None):
+    """Keep peer synchronization alive across transient peer and storage failures."""
+    if (not isinstance(interval, (int, float)) or isinstance(interval, bool)
+            or not math.isfinite(float(interval)) or interval <= 0):
+        raise ValueError("peer sync interval must be a finite positive number")
+    stop_event = stop_event or threading.Event()
+    while not stop_event.is_set():
+        # A single unavailable or malformed peer must not permanently kill
+        # synchronization with every other peer.
         for peer in list(chain.peers):
-            synchronize_peer(chain, peer)
-        with chain.lock:
-            committed_snapshot = list(chain.blocks)
-        engine.catch_up_chain(committed_snapshot)
-        engine.retry_pending_finalization()
-        time.sleep(interval)
+            if stop_event.is_set():
+                break
+            try:
+                synchronize_peer(chain, peer)
+            except Exception:
+                continue
+        try:
+            with chain.lock:
+                committed_snapshot = list(chain.blocks)
+            engine.catch_up_chain(committed_snapshot)
+        except Exception:
+            # Retry from the next snapshot; never advance signer state from an
+            # incomplete or unverified synchronization attempt.
+            pass
+        try:
+            engine.retry_pending_finalization()
+        except Exception:
+            # Finalization is retried on the next cycle after transient I/O
+            # or chain-persistence failures.
+            pass
+        if stop_event.wait(float(interval)):
+            break
 
 
 
