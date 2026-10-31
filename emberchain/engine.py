@@ -74,10 +74,16 @@ class ConsensusEngine:
             except (ValueError, RuntimeError):
                 return False
         self.proposals[proposal["block_hash"]] = block
-        self.proposal_metadata[proposal["block_hash"]] = {
+        incoming_metadata = {
             "valid_round": proposal["valid_round"],
             "valid_round_certificate": proposal["valid_round_certificate"],
         }
+        prior_metadata = self.proposal_metadata.get(proposal["block_hash"])
+        if (prior_metadata is None
+                or (incoming_metadata["valid_round"] is not None
+                    and (prior_metadata["valid_round"] is None
+                         or incoming_metadata["valid_round"] > prior_metadata["valid_round"]))):
+            self.proposal_metadata[proposal["block_hash"]] = incoming_metadata
         return True
 
     @_synchronized
