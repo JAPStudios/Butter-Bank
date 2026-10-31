@@ -319,6 +319,82 @@ class BFTChainTests(unittest.TestCase):
                 BFTAPI.chain = None
                 BFTAPI.peers = []
 
+    def test_bft_propose_api_relays_valid_round_recovery_proof(self):
+        with tempfile.TemporaryDirectory() as directory:
+            chain = BFTChain(self.cfg, Path(directory) / "chain.json")
+            selected = select_proposer(chain.validators, 1, 2)
+            selected_key = next(
+                key for key in self.validator_keys
+                if key.public_key().public_bytes_raw().hex() == selected
+            )
+            signer = ConsensusSigner(
+                selected_key, self.chain_id, chain.validators,
+                Path(directory) / "signer.json"
+            )
+            old_hash = "ab" * 32
+            old_certificate = [
+                make_vote(key, self.chain_id, 1, 0, "prevote",
+                          old_hash, chain.validators_hash)
+                for key in self.validator_keys[:3]
+            ]
+            signer.lock_from_prevotes(old_certificate, 0, old_hash)
+            local_round_change = signer.sign_round_change(2)
+            round_change_certificate = [
+                local_round_change,
+                *[
+                    __import__("consensus").make_round_change(
+                        key, self.chain_id, 1, 2, chain.validators_hash
+                    )
+                    for key in self.validator_keys[1:3]
+                ],
+            ]
+            signer.advance_round(round_change_certificate)
+            engine = ConsensusEngine(signer, chain.validate_proposal_block)
+            consensus_server = ConsensusHTTPServer(engine, host="127.0.0.1", port=0)
+            BFTAPI.chain = chain
+            BFTAPI.peers = chain.peers
+            BFTAPI.consensus_server = consensus_server
+            BFTAPI.consensus_key = selected_key
+            api_server = ThreadingHTTPServer(("127.0.0.1", 0), BFTAPI)
+            thread = threading.Thread(target=api_server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                block = chain.build_proposal(selected)
+                valid_round_certificate = [
+                    make_vote(key, self.chain_id, 1, 1, "prevote",
+                              block["hash"], chain.validators_hash)
+                    for key in self.validator_keys[:3]
+                ]
+                url = "http://127.0.0.1:" + str(api_server.server_address[1]) + "/propose"
+                request = urllib.request.Request(
+                    url,
+                    data=json.dumps({
+                        "valid_round": 1,
+                        "valid_round_certificate": valid_round_certificate,
+                    }).encode(),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(request, timeout=2) as response:
+                    result = json.loads(response.read())
+                    self.assertEqual(response.status, 200)
+                self.assertTrue(result["ok"])
+                self.assertEqual(result["proposal"]["valid_round"], 1)
+                self.assertEqual(result["proposal"]["valid_round_certificate"],
+                                 valid_round_certificate)
+                self.assertEqual(signer.state["signed"]["1:2:prevote"]["block_hash"],
+                                 block["hash"])
+            finally:
+                api_server.shutdown()
+                api_server.server_close()
+                thread.join(timeout=2)
+                consensus_server.server.server_close()
+                signer.close()
+                BFTAPI.consensus_server = None
+                BFTAPI.consensus_key = None
+                BFTAPI.chain = None
+                BFTAPI.peers = []
+
     def test_three_of_four_online_validators_reach_quorum(self):
         with tempfile.TemporaryDirectory() as directory:
             proposer = select_proposer(
