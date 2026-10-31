@@ -46,7 +46,7 @@ The four-node test is a deterministic integration test, not a substitute for for
 
    Collect more than two-thirds of the issuer signatures into that validator's admission certificate. Do not share issuer private keys or let the node operator make eligibility decisions for issuers.
 
-3. Configure issuer public keys, certificate signatures, and the current admission epoch in a copy of config.bft.example.json. The example intentionally contains placeholders and is not a runnable network configuration. Use a unique BFT chain_id that is never reused by a proof-of-work network or another deployment; transaction signatures are scoped to chain_id.
+3. Copy `milkchain/config.example.json` to a private `config.bft.json` file. Configure the issuer public keys, validator admission certificates, and current admission epoch in that copy. The committed example intentionally contains placeholders and is not a runnable network configuration. Use a unique BFT chain_id that is never reused by a proof-of-work network or another deployment; transaction signatures are scoped to chain_id.
 
 4. For a remote consensus listener, configure a TLS certificate and key, bind consensus_host to the public interface, and use HTTPS URLs in both peers and consensus_peers. A non-loopback listener without TLS is rejected. The node API is loopback-only; expose it externally only through an authenticated TLS reverse proxy. Keep validator.key and the signer state file backed up securely; never commit either file. The signer state must be a regular owner-only file (0600 on POSIX), symlinks are rejected, and an exclusive process lock prevents two node processes from signing with the same state. The node releases that lock on shutdown.
 
