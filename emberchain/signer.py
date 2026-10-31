@@ -250,7 +250,8 @@ class ConsensusSigner:
 
     @_synchronized
     def advance_round(self, certificate):
-        """Advance on a verified >2/3 certificate while retaining any existing lock."""        if not isinstance(certificate, (list, tuple)) or not certificate:
+        """Advance on a verified >2/3 certificate while retaining any existing lock."""
+        if not isinstance(certificate, (list, tuple)) or not certificate:
             raise ValueError("round-change certificate is required")
         target = certificate[0].get("round") if isinstance(certificate[0], dict) else None
         records = [
@@ -290,7 +291,10 @@ class ConsensusSigner:
             try:
                 os.unlink(name)
             except OSError:
-                @_synchronized
+                pass
+            raise
+
+    @_synchronized
     def authorize_unlock(self, valid_round, target_round, block_hash, certificate):
         """Persist a valid-round proof before permitting a conflicting prevote."""
         locked_round = self.state.get("locked_round")
@@ -301,15 +305,19 @@ class ConsensusSigner:
                 or target_round != self.current_round or valid_round <= locked_round
                 or valid_round >= target_round):
             raise ValueError("valid-round proof must be newer than the lock and earlier than the target round")
-        records = [{"public_key": key, "voting_power": power}
-                   for key, power in self.validators.items()]
+        records = [
+            {"public_key": key, "voting_power": power}
+            for key, power in self.validators.items()
+        ]
         if not verify_prevote_certificate(
             certificate, records, self.chain_id, self.height, valid_round, block_hash
         ):
             raise ValueError("invalid valid-round prevote certificate")
         authorization = {
-            "valid_round": valid_round, "target_round": target_round,
-            "block_hash": block_hash, "certificate": list(certificate),
+            "valid_round": valid_round,
+            "target_round": target_round,
+            "block_hash": block_hash,
+            "certificate": list(certificate),
         }
         prior = self.state.get("unlock_authorization")
         if prior is not None and prior != authorization:
@@ -348,6 +356,7 @@ class ConsensusSigner:
         self.state["unlock_authorization"] = None
         self._save()
 
+    @_synchronized
     def sign_vote(self, round_number, step, block_hash):
         if round_number != self.current_round:
             raise ValueError("refusing to sign outside the current persisted round")
