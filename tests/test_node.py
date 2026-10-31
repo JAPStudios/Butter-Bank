@@ -4,6 +4,7 @@ import tempfile
 import threading
 import unittest
 import urllib.request
+from unittest.mock import patch
 from http.server import ThreadingHTTPServer
 from email.message import Message
 from pathlib import Path
@@ -11,7 +12,7 @@ from pathlib import Path
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives import serialization
 
-from node import API, Chain, bhash, canon, signing_bytes, synchronize_peer
+from node import API, Chain, bhash, canon, signing_bytes, synchronize_peer, get
 
 
 def wallet():
@@ -288,6 +289,43 @@ class RequestBodyValidationTests(unittest.TestCase):
             self.make_handler(b'{}', '3').body()
         with self.assertRaisesRegex(ValueError, 'JSON request body must be an object'):
             self.make_handler(b'[]', '2').body()
+
+class BoundedPeerResponseTests(unittest.TestCase):
+    class Response(io.BytesIO):
+        def __init__(self, body, headers=None):
+            super().__init__(body)
+            self.headers = headers or Message()
+        def __enter__(self): return self
+        def __exit__(self, *args): self.close()
+
+    def test_reads_json_within_limit(self):
+        headers = Message()
+        headers.add_header('Content-Length', '7')
+        with patch('node.urllib.request.urlopen', return_value=self.Response(b'{"ok":1}', headers)):
+            self.assertEqual(get('https://peer.test/status', max_bytes=7), {'ok': 1})
+
+    def test_rejects_oversized_declared_or_actual_response(self):
+        headers = Message()
+        headers.add_header('Content-Length', '8')
+        with patch('node.urllib.request.urlopen', return_value=self.Response(b'{"ok":1}', headers)):
+            with self.assertRaisesRegex(ValueError, 'exceeds size limit'):
+                get('https://peer.test/status', max_bytes=7)
+        with patch('node.urllib.request.urlopen', return_value=self.Response(b'{"ok":1}')):
+            with self.assertRaisesRegex(ValueError, 'exceeds size limit'):
+                get('https://peer.test/status', max_bytes=6)
+
+    def test_rejects_duplicate_length_and_truncated_response(self):
+        headers = Message()
+        headers.add_header('Content-Length', '7')
+        headers.add_header('Content-Length', '7')
+        with patch('node.urllib.request.urlopen', return_value=self.Response(b'{"ok":1}', headers)):
+            with self.assertRaisesRegex(ValueError, 'duplicate response Content-Length'):
+                get('https://peer.test/status')
+        headers = Message()
+        headers.add_header('Content-Length', '8')
+        with patch('node.urllib.request.urlopen', return_value=self.Response(b'{"ok":1}', headers)):
+            with self.assertRaisesRegex(ValueError, 'incomplete peer response'):
+                get('https://peer.test/status')
 
 if __name__ == "__main__":
     unittest.main()

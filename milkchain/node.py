@@ -24,8 +24,28 @@ def ishex(s,n):
     except (ValueError,TypeError): return False
 def signing_bytes(tx): return canon({k:tx[k] for k in ('chain_id','sender','recipient','amount','fee','nonce')})
 
-def get(url):
-    with urllib.request.urlopen(url,timeout=3) as r: return json.loads(r.read())
+MAX_PEER_RESPONSE_BYTES=16*1024*1024
+
+
+def get(url, max_bytes=MAX_PEER_RESPONSE_BYTES):
+    if not isinstance(max_bytes,int) or isinstance(max_bytes,bool) or max_bytes<1:
+        raise ValueError('response size limit must be a positive integer')
+    with urllib.request.urlopen(url,timeout=3) as r:
+        lengths=r.headers.get_all('Content-Length', [])
+        if len(lengths)>1:
+            raise ValueError('duplicate response Content-Length')
+        if lengths:
+            raw_length=lengths[0]
+            if not raw_length.isascii() or not raw_length.isdecimal():
+                raise ValueError('invalid response Content-Length')
+            if int(raw_length)>max_bytes:
+                raise ValueError('peer response exceeds size limit')
+        raw=r.read(max_bytes+1)
+        if len(raw)>max_bytes:
+            raise ValueError('peer response exceeds size limit')
+        if lengths and len(raw)!=int(lengths[0]):
+            raise ValueError('incomplete peer response')
+        return json.loads(raw)
 def post(url,obj):
     req=urllib.request.Request(url,data=canon(obj),headers={'Content-Type':'application/json'},method='POST')
     with urllib.request.urlopen(req,timeout=3) as r: return json.loads(r.read())
