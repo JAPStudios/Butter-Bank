@@ -476,10 +476,15 @@ class ConsensusSigner:
     @_synchronized
     def finalize(self, votes, round_number, block_hash):
         self.validate_finalization(votes, round_number, block_hash)
+        previous_state = dict(self.state)
         self.state["height"] += 1
         self.state["round"] = 0
         self.state["lock"] = None
         self.state["locked_round"] = None
         self.state["signed_round_changes"] = {}
         self.state["unlock_authorization"] = None
-        self._save()
+        try:
+            self._save()
+        except Exception:
+            self.state = previous_state
+            raise
