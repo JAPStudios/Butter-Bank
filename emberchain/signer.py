@@ -123,6 +123,26 @@ class ConsensusSigner:
                 or locked_round > self.state["round"]
             ):
                 raise ValueError("invalid persisted lock round")
+            authorization = self.state.get("unlock_authorization")
+            if authorization is not None:
+                if (lock is None or not isinstance(authorization, dict)
+                        or set(authorization) != {
+                            "valid_round", "target_round", "block_hash", "certificate"
+                        }):
+                    raise ValueError("invalid persisted unlock authorization")
+                valid_round = authorization["valid_round"]
+                target_round = authorization["target_round"]
+                target_hash = authorization["block_hash"]
+                if (not isinstance(valid_round, int) or isinstance(valid_round, bool)
+                        or not isinstance(target_round, int) or isinstance(target_round, bool)
+                        or valid_round <= locked_round or target_round != self.state["round"]
+                        or valid_round >= target_round or not _is_hex(target_hash, 32)):
+                    raise ValueError("invalid persisted unlock authorization bounds")
+                if not verify_prevote_certificate(
+                    authorization["certificate"], validator_records, chain_id,
+                    height, valid_round, target_hash
+                ):
+                    raise ValueError("persisted unlock authorization failed certificate validation")
             for slot, entry in self.state["signed"].items():
                 if not isinstance(slot, str) or not isinstance(entry, dict):
                     raise ValueError("invalid persisted signing record")
