@@ -2,7 +2,7 @@ name: Android build
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/biscuits-stake-free-bft]
   pull_request:
 
 jobs:
