@@ -4,3 +4,9 @@ config.json
 data-*.json
 *-wallet.json
 *.tmp
+wallet.json
+wallets/
+*.key
+data/
+*.json.lock
+*.consensus.json
