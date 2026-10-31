@@ -53,6 +53,6 @@ pip install -r milkchain/requirements.txt
 PYTHONPATH=milkchain python milkchain/bft_node.py --config milkchain/config.example.json
 ```
 
-The BFT node requires more than two-thirds of validator voting power to finalize a block. Block issuance is disabled (zero block reward) until the Biscuits supply cap and issuance schedule are formally defined. Read [the consensus and validator operations specification](milkchain/docs/BFT_CONSENSUS.md) before configuring validators.
+The BFT node requires more than two-thirds of validator voting power to finalize a block. The current development configuration does not mint new Biscuits through block rewards. Monetary issuance rules are intentionally unspecified; no supply cap or issuance schedule is assumed. Read [the consensus and validator operations specification](milkchain/docs/BFT_CONSENSUS.md) before configuring validators.
 
 This is development software, not a production network. Validator-set transitions and revocation activation, anti-rollback signer storage, formal protocol review, independent security audit, adversarial network testing, and production recovery procedures remain necessary.
