@@ -70,6 +70,14 @@ class ConsensusEngine:
             return False
         if calculated_hash != proposal["block_hash"]:
             return False
+        if self.signer.locked_block_hash not in (None, proposal["block_hash"]):
+            try:
+                self.signer.authorize_unlock(
+                    proposal["valid_round"], proposal["round"],
+                    proposal["block_hash"], proposal["valid_round_certificate"],
+                )
+            except (ValueError, RuntimeError):
+                return False
         self.proposals[proposal["block_hash"]] = block
         return True
 
@@ -78,8 +86,6 @@ class ConsensusEngine:
         """Sign a prevote only for a locally validated proposal."""
         if block_hash not in self.proposals:
             raise ValueError("cannot prevote an unknown or invalid proposal")
-        if self.signer.locked_block_hash not in (None, block_hash):
-            raise ValueError("proposal conflicts with the persisted lock")
         return self.signer.sign_vote(self.round, "prevote", block_hash)
 
     @_synchronized
@@ -180,9 +186,9 @@ class ConsensusEngine:
     def receive_round_change(self, message):
         """Collect authenticated round-change messages; advance on >2/3 power.
 
-        A certificate only advances validators that have no lock. A locked
-        validator remains halted and retains its lock; this protocol does not
-        claim to implement Tendermint-style locked-round recovery.
+        A certificate advances the round without discarding a lock. A conflicting
+        proposal is accepted only with a verified valid-round prevote certificate
+        newer than the persisted lock; authorization is persisted before prevoting.
         """
         if not verify_round_change(message, self.validators, self.chain_id):
             return None
