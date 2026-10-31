@@ -12,6 +12,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from admission import issuer_set_hash, sign_admission
 from bft_chain import BFTChain
+from node import bhash
 from consensus import make_proposal, make_round_change, select_proposer
 from consensus_network import ConsensusHTTPServer
 from engine import ConsensusEngine
@@ -61,7 +62,7 @@ class BFTChainTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "chain.json"
             chain = BFTChain(self.cfg, path)
-            proposer = chain.validators[0]["public_key"]
+            proposer = select_proposer(chain.validators, len(chain.blocks), 0)
             block = chain.build_proposal(proposer)
             self.assertEqual(chain.validate_proposal_block(block), block["hash"])
             self.assertIsNone(chain.mine(proposer)[0])
@@ -84,10 +85,21 @@ class BFTChainTests(unittest.TestCase):
             self.assertEqual(reopened.blocks, chain.blocks)
             self.assertTrue(reopened.valid_chain(reopened.blocks))
 
+    def test_bft_chain_rejects_reward_redirection_away_from_selected_proposer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            chain = BFTChain(self.cfg, Path(directory) / "chain.json")
+            proposer = select_proposer(chain.validators, 1, 0)
+            block = chain.build_proposal(proposer)
+            other = next(item["public_key"] for item in chain.validators
+                         if item["public_key"] != proposer)
+            block["transactions"][0]["recipient"] = other
+            block["hash"] = bhash(block)
+            self.assertIsNone(chain.validate_proposal_block(block))
+
     def test_bft_chain_rejects_insufficient_commit_certificate(self):
         with tempfile.TemporaryDirectory() as directory:
             chain = BFTChain(self.cfg, Path(directory) / "chain.json")
-            block = chain.build_proposal(chain.validators[0]["public_key"])
+            block = chain.build_proposal(select_proposer(chain.validators, len(chain.blocks), 0))
             key = self.validator_keys[0]
             set_hash = validator_set_hash(chain.validators)
             vote = make_vote(key, self.chain_id, 1, 0, "precommit",
@@ -231,7 +243,7 @@ class BFTChainTests(unittest.TestCase):
                     index for index, key in enumerate(self.validator_keys)
                     if key.public_key().public_bytes_raw().hex() == selected
                 )
-                block = chains[proposer_index].build_proposal(selected)
+                block = chains[proposer_index].build_proposal(selected, round_number=2)
                 valid_round_certificate = [
                     make_vote(key, self.chain_id, 1, 1, "prevote",
                               block["hash"], set_hash)
@@ -379,10 +391,20 @@ class BFTChainTests(unittest.TestCase):
                 self.assertTrue(chain.accept_finalized_block(block, 0, votes)[0])
                 return block
 
-            left_first = commit_next(left, left.validators[0]["public_key"])
-            right_first = commit_next(right, right.validators[1]["public_key"])
+            selected = select_proposer(left.validators, len(left.blocks), 0)
+            left_first = commit_next(left, selected)
+            right_block = right.build_proposal(selected)
+            right_block["timestamp"] += 1
+            right_block["hash"] = bhash(right_block)
+            right_votes = [
+                make_vote(keys_by_public[item["public_key"]], self.chain_id,
+                          right_block["height"], 0, "precommit", right_block["hash"], set_hash)
+                for item in right.validators[:3]
+            ]
+            self.assertTrue(right.accept_finalized_block(right_block, 0, right_votes)[0])
+            right_first = right_block
             self.assertNotEqual(left_first["hash"], right_first["hash"])
-            commit_next(right, right.validators[2]["public_key"])
+            commit_next(right, select_proposer(right.validators, len(right.blocks), 0))
             self.assertEqual(len(right.blocks), 3)
             ok, message = left.replace(right.blocks)
             self.assertFalse(ok)
@@ -482,7 +504,7 @@ class BFTChainTests(unittest.TestCase):
             thread = threading.Thread(target=api_server.serve_forever, daemon=True)
             thread.start()
             try:
-                block = chain.build_proposal(selected)
+                block = chain.build_proposal(selected, round_number=2)
                 valid_round_certificate = [
                     make_vote(key, self.chain_id, 1, 1, "prevote",
                               block["hash"], chain.validators_hash)
