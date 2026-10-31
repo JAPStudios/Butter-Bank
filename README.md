@@ -35,6 +35,21 @@ pip install -r emberchain/requirements.txt
 PYTHONPATH=emberchain python -m unittest discover -s tests -v
 ```
 
+Create a user wallet and inspect its public address with:
+
+```sh
+PYTHONPATH=emberchain python -m wallet create wallet.json
+PYTHONPATH=emberchain python -m wallet address wallet.json
+```
+
+Submit a signed transfer to a running local node using the recipient's 32-byte public key and an amount in integer base units:
+
+```sh
+PYTHONPATH=emberchain python -m tx --wallet wallet.json --node http://127.0.0.1:8333 --to RECIPIENT_PUBLIC_KEY --amount 1
+```
+
+Wallet readers reject symlinks, non-regular files, group/world-readable files on POSIX, and mismatched public/private key pairs. Keep wallet files out of source control and backups that are not encrypted.
+
 For BFT validator setup, read docs/BFT_CONSENSUS.md and start from config.bft.example.json. Generate a validator key with:
 
 ```sh
