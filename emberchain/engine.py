@@ -65,6 +65,15 @@ class ConsensusEngine:
             return False
         if calculated_hash != proposal["block_hash"]:
             return False
+        # Account-chain coinbase value consists of the configured reward plus
+        # transaction fees. It must be paid to the signed proposal's author;
+        # otherwise a proposer could redirect block value to an arbitrary key.
+        if isinstance(block, dict) and "transactions" in block:
+            transactions = block["transactions"]
+            if (not isinstance(transactions, list) or not transactions
+                    or not isinstance(transactions[0], dict)
+                    or transactions[0].get("recipient") != proposal["proposer"]):
+                return False
         if self.signer.locked_block_hash not in (None, proposal["block_hash"]):
             try:
                 self.signer.authorize_unlock(
