@@ -78,6 +78,8 @@ class BFTChainTests(unittest.TestCase):
             ok, message = chain.accept_finalized_block(block, 0, votes)
             self.assertTrue(ok, message)
             self.assertEqual(len(chain.blocks), 2)
+            self.assertTrue(chain.accept_finalized_block(block, 0, votes)[0])
+            self.assertEqual(len(chain.blocks), 2)
             reopened = BFTChain(self.cfg, path)
             self.assertEqual(reopened.blocks, chain.blocks)
             self.assertTrue(reopened.valid_chain(reopened.blocks))
