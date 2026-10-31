@@ -24,7 +24,7 @@ def _synchronized(method):
 
 
 class ConsensusSigner:
-    """Persist each signed vote before returning it; never unlock within a height."""
+    """Persist signed votes and require durable valid-round proof to change locks."""
 
     def __init__(self, private_key, chain_id, validators, state_path, initial_height=1):
         if not isinstance(initial_height, int) or isinstance(initial_height, bool) or initial_height < 1:
