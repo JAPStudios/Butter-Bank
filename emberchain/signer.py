@@ -153,12 +153,6 @@ class ConsensusSigner:
                 if (signed_height == height and parts[2] == "precommit"
                         and (lock is None or entry["block_hash"] != lock)):
                     raise ValueError("persisted precommit conflicts with the current lock")
-            for target in self.state["signed_round_changes"]:
-                for signed_slot in self.state["signed"]:
-                    parts = signed_slot.split(":")
-                    if (len(parts) == 3 and parts[0] == str(height)
-                            and int(parts[1]) < int(target)):
-                        raise ValueError("persisted vote conflicts with a later round-change request")
         else:
             self.state = {"chain_id": chain_id, "validator_set_hash": self.validators_hash,
                           "public_key": self.public_key, "height": initial_height,
@@ -213,16 +207,10 @@ class ConsensusSigner:
 
     @_synchronized
     def sign_round_change(self, target_round):
-        """Persist a signed request for a later round; locked validators refuse."""
+        """Persist a later-round request without discarding the current lock."""
         if (not isinstance(target_round, int) or isinstance(target_round, bool)
                 or target_round <= self.current_round or target_round > MAX_ROUND):
             raise ValueError("target_round must be greater than the current round")
-        if self.state["lock"] is not None:
-            raise RuntimeError("locked validator cannot request an unlocked round change")
-        for signed_slot in self.state["signed"]:
-            parts = signed_slot.split(":")
-            if len(parts) == 3 and parts[0] == str(self.height):
-                raise RuntimeError("validator with a signed vote cannot request a round change at this height")
         slot = str(target_round)
         prior = self.state["signed_round_changes"].get(slot)
         if prior is not None:
@@ -236,10 +224,7 @@ class ConsensusSigner:
 
     @_synchronized
     def advance_round(self, certificate):
-        """Advance only on a verified >2/3 certificate while remaining unlocked."""
-        if self.state["lock"] is not None:
-            raise RuntimeError("locked validator cannot advance without lock-recovery proof")
-        if not isinstance(certificate, (list, tuple)) or not certificate:
+        """Advance on a verified >2/3 certificate while retaining any existing lock."""        if not isinstance(certificate, (list, tuple)) or not certificate:
             raise ValueError("round-change certificate is required")
         target = certificate[0].get("round") if isinstance(certificate[0], dict) else None
         records = [
