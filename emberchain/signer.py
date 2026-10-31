@@ -90,6 +90,7 @@ class ConsensusSigner:
             if not isinstance(self.state.get("signed"), dict):
                 raise ValueError("invalid persisted signing history")
             self.state.setdefault("signed_round_changes", {})
+            self.state.setdefault("unlock_authorization", None)
             if not isinstance(self.state["signed_round_changes"], dict):
                 raise ValueError("invalid persisted round-change history")
             validator_records = [
@@ -196,6 +197,11 @@ class ConsensusSigner:
     def locked_block_hash(self):
         with self._lock:
             return self.state["lock"]
+    @property
+    def locked_round(self):
+        with self._lock:
+            return self.state.get("locked_round")
+
 
     @property
     def pending_round_change_targets(self):
@@ -265,6 +271,34 @@ class ConsensusSigner:
                 os.unlink(name)
             except OSError:
                 @_synchronized
+    def authorize_unlock(self, valid_round, target_round, block_hash, certificate):
+        """Persist a valid-round proof before permitting a conflicting prevote."""
+        locked_round = self.state.get("locked_round")
+        if self.state.get("lock") is None:
+            return True
+        if (not isinstance(valid_round, int) or isinstance(valid_round, bool)
+                or not isinstance(target_round, int) or isinstance(target_round, bool)
+                or target_round != self.current_round or valid_round <= locked_round
+                or valid_round >= target_round):
+            raise ValueError("valid-round proof must be newer than the lock and earlier than the target round")
+        records = [{"public_key": key, "voting_power": power}
+                   for key, power in self.validators.items()]
+        if not verify_prevote_certificate(
+            certificate, records, self.chain_id, self.height, valid_round, block_hash
+        ):
+            raise ValueError("invalid valid-round prevote certificate")
+        authorization = {
+            "valid_round": valid_round, "target_round": target_round,
+            "block_hash": block_hash, "certificate": list(certificate),
+        }
+        prior = self.state.get("unlock_authorization")
+        if prior is not None and prior != authorization:
+            raise ValueError("conflicting unlock authorization already persisted")
+        self.state["unlock_authorization"] = authorization
+        self._save()
+        return True
+
+    @_synchronized
     def lock_from_prevotes(self, votes, round_number, block_hash):
         """Persist a lock only from a verified >2/3 prevote certificate."""
         if (not isinstance(round_number, int) or isinstance(round_number, bool)
@@ -281,12 +315,17 @@ class ConsensusSigner:
         ):
             raise ValueError("invalid or insufficient prevote certificate")
         if self.state["lock"] not in (None, block_hash):
-            raise ValueError("this signer version never unlocks within a height")
+            authorization = self.state.get("unlock_authorization")
+            if (not isinstance(authorization, dict)
+                    or authorization.get("target_round") != round_number
+                    or authorization.get("block_hash") != block_hash):
+                raise ValueError("conflicting lock requires persisted valid-round authorization")
         locked_round = self.state.get("locked_round")
         if locked_round is not None and round_number < locked_round:
             raise ValueError("cannot move a persisted lock to an earlier round")
         self.state["lock"] = block_hash
         self.state["locked_round"] = round_number
+        self.state["unlock_authorization"] = None
         self._save()
 
     def sign_vote(self, round_number, step, block_hash):
@@ -300,7 +339,11 @@ class ConsensusSigner:
         ):
             raise ValueError("refusing to vote after requesting a later round")
         if self.state["lock"] not in (None, block_hash):
-            raise ValueError("vote conflicts with persisted lock")
+            authorization = self.state.get("unlock_authorization")
+            if (step != "prevote" or not isinstance(authorization, dict)
+                    or authorization.get("target_round") != round_number
+                    or authorization.get("block_hash") != block_hash):
+                raise ValueError("vote conflicts with persisted lock")
         if step == "precommit" and self.state["lock"] != block_hash:
             raise ValueError("precommit requires a persisted prevote quorum lock")
         slot = f"{self.height}:{round_number}:{step}"
