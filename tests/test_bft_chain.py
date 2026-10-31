@@ -50,13 +50,19 @@ class BFTChainTests(unittest.TestCase):
             "chain_id": self.chain_id,
             "consensus": "bft",
             "difficulty": 1,
-            "block_reward": 25,
+            "block_reward": 0,
             "genesis_allocations": {},
             "admission_issuers": self.issuer_public,
             "admission_certificates": self.certificates,
             "admission_epoch": 10,
             "peers": [],
         }
+
+    def test_bft_chain_disables_issuance_until_supply_rules_are_defined(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cfg = dict(self.cfg, block_reward=1)
+            with self.assertRaisesRegex(ValueError, "supply and issuance rules"):
+                BFTChain(cfg, Path(directory) / "chain.json")
 
     def test_bft_chain_finalizes_and_persists_without_mining(self):
         with tempfile.TemporaryDirectory() as directory:
