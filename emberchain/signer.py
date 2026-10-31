@@ -177,7 +177,7 @@ class ConsensusSigner:
         else:
             self.state = {"chain_id": chain_id, "validator_set_hash": self.validators_hash,
                           "public_key": self.public_key, "height": initial_height,
-                          "round": 0, "lock": None, "locked_round": None, "signed": {}, "signed_round_changes": {}}
+                          "round": 0, "lock": None, "locked_round": None, "signed": {}, "signed_round_changes": {}, "unlock_authorization": None}
             self._save()
 
     def close(self):
@@ -420,6 +420,7 @@ class ConsensusSigner:
             self.state["lock"] = None
             self.state["locked_round"] = None
             self.state["signed_round_changes"] = {}
+            self.state["unlock_authorization"] = None
             self._save()
 
     @_synchronized
