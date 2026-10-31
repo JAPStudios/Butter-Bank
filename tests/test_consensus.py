@@ -1000,6 +1000,8 @@ class LockedRoundRecoveryTests(unittest.TestCase):
             self.assertEqual(reopened.locked_block_hash, self.old_hash)
             with self.assertRaises(ValueError):
                 reopened.sign_vote(2, "precommit", self.new_hash)
+            with self.assertRaisesRegex(ValueError, "conflicts with this round"):
+                reopened.sign_vote(2, "precommit", self.old_hash)
             reopened.lock_from_prevotes(self._prevote_certificate(2, self.new_hash),
                                         2, self.new_hash)
             self.assertEqual(reopened.locked_block_hash, self.new_hash)
