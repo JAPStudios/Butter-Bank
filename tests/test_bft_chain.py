@@ -339,13 +339,17 @@ class BFTChainTests(unittest.TestCase):
             ]
             signer.lock_from_prevotes(old_certificate, 0, old_hash)
             local_round_change = signer.sign_round_change(2)
+            other_keys = [
+                key for key in self.validator_keys
+                if key.public_key().public_bytes_raw().hex() != selected
+            ][:2]
             round_change_certificate = [
                 local_round_change,
                 *[
                     make_round_change(
                         key, self.chain_id, 1, 2, chain.validators_hash
                     )
-                    for key in self.validator_keys[1:3]
+                    for key in other_keys
                 ],
             ]
             signer.advance_round(round_change_certificate)
