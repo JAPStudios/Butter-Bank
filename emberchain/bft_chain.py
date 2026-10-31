@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 from node import Chain, bhash, canon, sha, MAX_TXS
-from consensus import verify_commit_certificate, verify_prevote_certificate, validator_set_hash
+from consensus import verify_commit_certificate, verify_prevote_certificate, validator_set_hash, select_proposer
 from admission import validator_set_from_certificates
 
 
@@ -142,6 +142,13 @@ class BFTChain(Chain):
                         index, round_number, block["hash"],
                     ):
                         return False
+                    # Reward and collected fees are payable only to the
+                    # deterministic proposer for this height and commit round.
+                    if (not isinstance(block["transactions"], list)
+                            or not block["transactions"]
+                            or block["transactions"][0].get("recipient")
+                            != select_proposer(self.validators, index, round_number)):
+                        return False
                     if not self._verify_recovery_metadata(block, index, round_number):
                         return False
                 cleaned.append({key: block[key] for key in base_fields})
@@ -163,10 +170,11 @@ class BFTChain(Chain):
                 return None
             return bhash(block)
 
-    def build_proposal(self, proposer):
-        """Build a zero-work candidate block; it is not final until BFT commits it."""
-        if not any(v["public_key"] == proposer for v in self.validators):
-            raise ValueError("proposer is not an admitted validator")
+    def build_proposal(self, proposer, round_number=0):
+        """Build a candidate for the deterministic proposer of this height/round."""
+        expected = select_proposer(self.validators, len(self.blocks), round_number)
+        if proposer != expected:
+            raise ValueError("proposer is not selected for this height and round")
         with self.lock:
             balances, nonces = self.state()
             chosen, fees = [], 0
