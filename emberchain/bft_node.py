@@ -99,8 +99,9 @@ def bft_round_timeout_loop(consensus_server, initial_timeout=10.0,
                            maximum_timeout=120.0, stop_event=None):
     """Request certified round changes after inactivity, with bounded backoff.
 
-    Validators that have signed a vote or acquired a lock refuse to change
-    rounds. The loop therefore cannot bypass signer anti-equivocation rules.
+    A locked or already-voted validator may request a later round, but its
+    lock remains intact. Any conflicting prevote still requires a valid-round
+    certificate checked and persisted by the signer.
     """
     if (not isinstance(initial_timeout, (int, float))
             or isinstance(initial_timeout, bool)
