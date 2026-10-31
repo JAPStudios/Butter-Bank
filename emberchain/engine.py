@@ -1,10 +1,4 @@
-"""Event-driven BFT round coordinator.
-
-This is a conservative first state machine, not a full Tendermint implementation.
-It deliberately halts round advancement after a lock rather than attempting
-unsafe unlock rules. A later protocol revision must implement and test the
-complete locked-round/valid-round rules before production use.
-"""
+"""Event-driven BFT round coordinator with certificate-gated lock recovery."""
 from collections import defaultdict
 import threading
 
