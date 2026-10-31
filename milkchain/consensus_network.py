@@ -19,6 +19,31 @@ from consensus import canonical_json, verify_vote, verify_round_change
 from engine import ConsensusEngine
 
 
+MAX_CONSENSUS_MESSAGE_BYTES = 1_000_000
+
+
+def read_json_message(headers, stream):
+    """Read one unambiguous, size-bounded JSON object from an HTTP request."""
+    if headers.get_all("Transfer-Encoding", []):
+        raise ValueError("Transfer-Encoding is not supported")
+    lengths = headers.get_all("Content-Length", [])
+    if len(lengths) != 1:
+        raise ValueError("exactly one Content-Length is required")
+    raw_length = lengths[0]
+    if not isinstance(raw_length, str) or not raw_length.isascii() or not raw_length.isdecimal():
+        raise ValueError("invalid Content-Length")
+    size = int(raw_length)
+    if size < 1 or size > MAX_CONSENSUS_MESSAGE_BYTES:
+        raise ValueError("invalid message size")
+    raw_body = stream.read(size)
+    if len(raw_body) != size:
+        raise ValueError("incomplete request body")
+    value = json.loads(raw_body)
+    if not isinstance(value, dict):
+        raise ValueError("message must be a JSON object")
+    return value
+
+
 class BoundedThreadingHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     block_on_close = False
@@ -93,19 +118,7 @@ class ConsensusHTTPServer:
                 self.wfile.write(payload)
 
             def read_json(self):
-                raw = self.headers.get("Content-Length")
-                if raw is None:
-                    raise ValueError("Content-Length is required")
-                try:
-                    size = int(raw)
-                except ValueError:
-                    raise ValueError("invalid Content-Length")
-                if size < 1 or size > 1_000_000:
-                    raise ValueError("invalid message size")
-                value = json.loads(self.rfile.read(size))
-                if not isinstance(value, dict):
-                    raise ValueError("message must be a JSON object")
-                return value
+                return read_json_message(self.headers, self.rfile)
 
             def rate_allowed(self):
                 address = self.client_address[0]

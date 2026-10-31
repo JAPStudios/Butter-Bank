@@ -1,3 +1,4 @@
+import io
 import os
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -6,6 +7,7 @@ import threading
 import urllib.request
 import tempfile
 from pathlib import Path
+from email.message import Message
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -25,7 +27,7 @@ from consensus import (
 )
 from signer import ConsensusSigner
 from engine import ConsensusEngine
-from consensus_network import ConsensusHTTPServer
+from consensus_network import ConsensusHTTPServer, read_json_message
 from bft_node import bft_round_timeout_loop
 
 
@@ -1158,6 +1160,51 @@ class LockedRoundRecoveryTests(unittest.TestCase):
                     1, 3, self.new_hash, self._prevote_certificate(1, self.new_hash)
                 )
             signer.close()
+
+
+class ConsensusHTTPBodyParsingTests(unittest.TestCase):
+    def _headers(self, *content_lengths, transfer_encoding=None):
+        headers = Message()
+        for value in content_lengths:
+            headers.add_header("Content-Length", value)
+        if transfer_encoding is not None:
+            headers.add_header("Transfer-Encoding", transfer_encoding)
+        return headers
+
+    def test_accepts_one_complete_json_object(self):
+        body = b'{"vote":{}}'
+        self.assertEqual(
+            read_json_message(self._headers(str(len(body))), io.BytesIO(body)),
+            {"vote": {}},
+        )
+
+    def test_rejects_duplicate_content_length_headers(self):
+        with self.assertRaisesRegex(ValueError, "exactly one Content-Length"):
+            read_json_message(self._headers("2", "2"), io.BytesIO(b"{}"))
+
+    def test_rejects_transfer_encoding(self):
+        with self.assertRaisesRegex(ValueError, "Transfer-Encoding"):
+            read_json_message(
+                self._headers("2", transfer_encoding="chunked"), io.BytesIO(b"{}")
+            )
+
+    def test_rejects_non_decimal_content_length(self):
+        for value in ("+2", " 2", "2, 2", "٢"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "invalid Content-Length"):
+                    read_json_message(self._headers(value), io.BytesIO(b"{}"))
+
+    def test_rejects_truncated_request_body(self):
+        with self.assertRaisesRegex(ValueError, "incomplete request body"):
+            read_json_message(self._headers("3"), io.BytesIO(b"{}"))
+
+    def test_rejects_oversized_request_body_before_reading(self):
+        with self.assertRaisesRegex(ValueError, "invalid message size"):
+            read_json_message(self._headers("1000001"), io.BytesIO(b"{}"))
+
+    def test_rejects_non_object_json(self):
+        with self.assertRaisesRegex(ValueError, "JSON object"):
+            read_json_message(self._headers("2"), io.BytesIO(b"[]"))
 
 
 if __name__ == "__main__":
