@@ -50,7 +50,10 @@ class PeerSyncLoopTests(unittest.TestCase):
             return True
 
         with patch.object(bft_node, "synchronize_peer", side_effect=sync):
-            bft_node.bft_peer_sync_loop(chain, engine, interval=3, stop_event=stop)
+            with self.assertLogs(bft_node.LOGGER, level="WARNING") as captured:
+                bft_node.bft_peer_sync_loop(chain, engine, interval=3, stop_event=stop)
+
+        self.assertIn("unavailable", "\\n".join(captured.output))
 
         self.assertEqual(contacted, ["unavailable", "healthy"])
         self.assertEqual(engine.snapshots, [[{"height": 0}]])

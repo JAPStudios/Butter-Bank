@@ -2,6 +2,7 @@
 """Run a Biscuits account-chain node using stake-free BFT finality."""
 import argparse
 import json
+import logging
 import math
 import os
 import stat
@@ -19,6 +20,9 @@ from engine import ConsensusEngine
 from signer import ConsensusSigner
 from bft_chain import BFTChain
 from node import API, synchronize_peer
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class BFTAPI(API):
@@ -108,6 +112,7 @@ def bft_peer_sync_loop(chain, engine, interval=10, stop_event=None):
             try:
                 synchronize_peer(chain, peer)
             except Exception:
+                LOGGER.warning("BFT peer synchronization failed for %s", peer, exc_info=True)
                 continue
         try:
             with chain.lock:
@@ -116,13 +121,13 @@ def bft_peer_sync_loop(chain, engine, interval=10, stop_event=None):
         except Exception:
             # Retry from the next snapshot; never advance signer state from an
             # incomplete or unverified synchronization attempt.
-            pass
+            LOGGER.exception("BFT chain catch-up failed; will retry next cycle")
         try:
             engine.retry_pending_finalization()
         except Exception:
             # Finalization is retried on the next cycle after transient I/O
             # or chain-persistence failures.
-            pass
+            LOGGER.exception("BFT pending finalization retry failed; will retry next cycle")
         if stop_event.wait(interval):
             break
 
