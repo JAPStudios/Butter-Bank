@@ -95,6 +95,7 @@ def bft_peer_sync_loop(chain, engine, interval=10):
         with chain.lock:
             committed_snapshot = list(chain.blocks)
         engine.catch_up_chain(committed_snapshot)
+        engine.retry_pending_finalization()
         time.sleep(interval)
 
 
