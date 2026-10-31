@@ -373,8 +373,14 @@ class ConsensusSigner:
                     or authorization.get("target_round") != round_number
                     or authorization.get("block_hash") != block_hash):
                 raise ValueError("vote conflicts with persisted lock")
-        if step == "precommit" and self.state["lock"] != block_hash:
-            raise ValueError("precommit requires a persisted prevote quorum lock")
+        if step == "precommit":
+            if self.state["lock"] != block_hash:
+                raise ValueError("precommit requires a persisted prevote quorum lock")
+            prior_prevote = self.state["signed"].get(
+                f"{self.height}:{round_number}:prevote"
+            )
+            if prior_prevote is not None and prior_prevote["block_hash"] != block_hash:
+                raise ValueError("precommit conflicts with this round's signed prevote")
         slot = f"{self.height}:{round_number}:{step}"
         prior = self.state["signed"].get(slot)
         if prior:
