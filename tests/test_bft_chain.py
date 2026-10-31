@@ -89,12 +89,26 @@ class BFTChainTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             chain = BFTChain(self.cfg, Path(directory) / "chain.json")
             proposer = select_proposer(chain.validators, 1, 0)
+            proposer_key = next(
+                key for key in self.validator_keys
+                if key.public_key().public_bytes_raw().hex() == proposer
+            )
             block = chain.build_proposal(proposer)
             other = next(item["public_key"] for item in chain.validators
                          if item["public_key"] != proposer)
             block["transactions"][0]["recipient"] = other
             block["hash"] = bhash(block)
-            self.assertIsNone(chain.validate_proposal_block(block))
+            signer = ConsensusSigner(
+                proposer_key, self.chain_id, chain.validators,
+                Path(directory) / "signer.json"
+            )
+            engine = ConsensusEngine(signer, chain.validate_proposal_block)
+            proposal = make_proposal(
+                proposer_key, self.chain_id, 1, 0, block["hash"],
+                chain.validators_hash
+            )
+            self.assertFalse(engine.receive_proposal(proposal, block))
+            signer.close()
 
     def test_bft_chain_rejects_insufficient_commit_certificate(self):
         with tempfile.TemporaryDirectory() as directory:
