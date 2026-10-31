@@ -300,19 +300,19 @@ class BoundedPeerResponseTests(unittest.TestCase):
 
     def test_reads_json_within_limit(self):
         headers = Message()
-        headers.add_header('Content-Length', '7')
+        headers.add_header('Content-Length', '8')
         with patch('node.urllib.request.urlopen', return_value=self.Response(b'{"ok":1}', headers)):
-            self.assertEqual(get('https://peer.test/status', max_bytes=7), {'ok': 1})
+            self.assertEqual(get('https://peer.test/status', max_bytes=8), {'ok': 1})
 
     def test_rejects_oversized_declared_or_actual_response(self):
         headers = Message()
-        headers.add_header('Content-Length', '8')
+        headers.add_header('Content-Length', '9')
         with patch('node.urllib.request.urlopen', return_value=self.Response(b'{"ok":1}', headers)):
             with self.assertRaisesRegex(ValueError, 'exceeds size limit'):
-                get('https://peer.test/status', max_bytes=7)
+                get('https://peer.test/status', max_bytes=8)
         with patch('node.urllib.request.urlopen', return_value=self.Response(b'{"ok":1}')):
             with self.assertRaisesRegex(ValueError, 'exceeds size limit'):
-                get('https://peer.test/status', max_bytes=6)
+                get('https://peer.test/status', max_bytes=7)
 
     def test_rejects_duplicate_length_and_truncated_response(self):
         headers = Message()
@@ -322,7 +322,7 @@ class BoundedPeerResponseTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'duplicate response Content-Length'):
                 get('https://peer.test/status')
         headers = Message()
-        headers.add_header('Content-Length', '8')
+        headers.add_header('Content-Length', '9')
         with patch('node.urllib.request.urlopen', return_value=self.Response(b'{"ok":1}', headers)):
             with self.assertRaisesRegex(ValueError, 'incomplete peer response'):
                 get('https://peer.test/status')
