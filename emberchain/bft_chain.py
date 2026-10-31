@@ -201,11 +201,19 @@ class BFTChain(Chain):
         """Reject the inherited proof-of-work block endpoint in BFT mode."""
         return False, "BFT blocks must be accepted through consensus finality or verified chain synchronization"
 
-    def accept_finalized_block(self, block, round_number, commit_votes):
+    def accept_finalized_block(
+        self, block, round_number, commit_votes,
+        valid_round=None, valid_round_certificate=None,
+    ):
         with self.lock:
             finalized = dict(block)
             finalized["commit_round"] = round_number
             finalized["commit_certificate"] = list(commit_votes)
+            if valid_round is not None:
+                finalized["valid_round"] = valid_round
+                finalized["valid_round_certificate"] = list(valid_round_certificate or [])
+            elif valid_round_certificate not in (None, [], ()):
+                return False, "valid-round certificate supplied without valid_round"
             if not self.valid_chain(self.blocks + [finalized]):
                 return False, "invalid BFT-finalized block or commit certificate"
             previous_blocks = self.blocks
