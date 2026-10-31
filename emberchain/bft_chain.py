@@ -169,6 +169,10 @@ class BFTChain(Chain):
     def mine(self, miner):
         return None, "proof-of-work mining is disabled; BFT validators finalize blocks"
 
+    def accept_block(self, block):
+        """Reject the inherited proof-of-work block endpoint in BFT mode."""
+        return False, "BFT blocks must be accepted through consensus finality or verified chain synchronization"
+
     def accept_finalized_block(self, block, round_number, commit_votes):
         with self.lock:
             finalized = dict(block)
