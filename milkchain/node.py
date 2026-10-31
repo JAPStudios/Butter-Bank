@@ -3,7 +3,7 @@
 import argparse, hashlib, json, threading, time, urllib.request
 from pathlib import Path
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 MAX_TXS=100
@@ -25,6 +25,7 @@ def ishex(s,n):
 def signing_bytes(tx): return canon({k:tx[k] for k in ('chain_id','sender','recipient','amount','fee','nonce')})
 
 MAX_PEER_RESPONSE_BYTES=16*1024*1024
+MAX_CHAIN_PAGE_BLOCKS=100
 
 
 def get(url, max_bytes=MAX_PEER_RESPONSE_BYTES):
@@ -55,6 +56,30 @@ def broadcast(peers,path,obj):
         try: post(p+path,obj)
         except Exception: pass
 
+def fetch_peer_chain(peer, status):
+    """Download a peer chain in bounded pages so history can grow indefinitely."""
+    height=status.get('height') if isinstance(status,dict) else None
+    if not isinstance(height,int) or isinstance(height,bool) or height<0:
+        raise ValueError('peer status has an invalid chain height')
+    total=height+1
+    blocks=[]
+    start=0
+    while start<total:
+        limit=min(MAX_CHAIN_PAGE_BLOCKS,total-start)
+        page=get(f'{peer}/chain?start={start}&limit={limit}')
+        if (not isinstance(page,dict) or page.get('start')!=start
+                or not isinstance(page.get('chain'),list)
+                or not page['chain'] or len(page['chain'])>limit):
+            raise ValueError('peer returned an invalid chain page')
+        blocks.extend(page['chain'])
+        if len(blocks)!=start+len(page['chain']):
+            raise ValueError('peer chain page sequence is inconsistent')
+        start=len(blocks)
+    if len(blocks)!=total:
+        raise ValueError('peer chain does not match its reported height')
+    return blocks
+
+
 def synchronize_peer(chain, peer):
     """Fetch and validate a peer's chain; adopt it only if it has more work."""
     try:
@@ -64,7 +89,7 @@ def synchronize_peer(chain, peer):
             expected['validator_set_hash']=chain.validators_hash
         if any(status.get(k)!=v for k,v in expected.items()):
             return False
-        candidate=get(peer+'/chain').get('chain')
+        candidate=fetch_peer_chain(peer,status)
         if not chain.valid_chain(candidate):
             return False
         return chain.replace(candidate)[0]
@@ -259,7 +284,22 @@ class API(BaseHTTPRequestHandler):
                     status['validator_set_hash']=self.chain.validators_hash
                 self.sendj(200,status)
         elif p=='/chain':
-            with self.chain.lock: self.sendj(200,{'chain':list(self.chain.blocks)})
+            query=parse_qs(urlparse(self.path).query,keep_blank_values=True)
+            if not query:
+                with self.chain.lock: self.sendj(200,{'chain':list(self.chain.blocks)})
+                return
+            if (set(query)!={'start','limit'} or len(query['start'])!=1 or len(query['limit'])!=1
+                    or not query['start'][0].isascii() or not query['start'][0].isdecimal()
+                    or not query['limit'][0].isascii() or not query['limit'][0].isdecimal()):
+                self.sendj(400,{'error':'chain page requires one non-negative start and positive limit'})
+                return
+            start,limit=int(query['start'][0]),int(query['limit'][0])
+            if limit<1 or limit>MAX_CHAIN_PAGE_BLOCKS:
+                self.sendj(400,{'error':'chain page limit is outside the allowed range'})
+                return
+            with self.chain.lock:
+                page=list(self.chain.blocks[start:start+limit])
+            self.sendj(200,{'start':start,'chain':page})
         elif p=='/balances':
             with self.chain.lock: b,n=self.chain.state()
             self.sendj(200,{'balances':b,'nonces':n})
@@ -310,7 +350,7 @@ class API(BaseHTTPRequestHandler):
                     expected['validator_set_hash']=self.chain.validators_hash
                 if any(status.get(k)!=v for k,v in expected.items()):
                     self.sendj(400,{'error':'peer is on a different network configuration'});return
-                remote_chain=get(peer+'/chain').get('chain')
+                remote_chain=fetch_peer_chain(peer,status)
                 if not self.chain.valid_chain(remote_chain):
                     self.sendj(400,{'error':'peer supplied an invalid chain'});return
                 if len(remote_chain)>len(self.chain.blocks):

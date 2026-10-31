@@ -327,5 +327,40 @@ class BoundedPeerResponseTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'incomplete peer response'):
                 get('https://peer.test/status')
 
+
+class ChainPaginationTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.cfg = {
+            "chain_id": "pagination-test-chain",
+            "difficulty": 1,
+            "block_reward": 50,
+            "genesis_allocations": {},
+        }
+        self.chain = Chain(self.cfg, Path(self.temp.name) / "chain.json")
+
+    def test_peer_chain_is_fetched_in_pages(self):
+        from node import fetch_peer_chain
+        blocks = [self.chain.genesis_block()]
+        status = {"height": 0}
+        with patch("node.get", return_value={"start": 0, "chain": blocks}) as request:
+            self.assertEqual(fetch_peer_chain("https://peer.test", status), blocks)
+            request.assert_called_once_with("https://peer.test/chain?start=0&limit=1")
+
+    def test_peer_chain_rejects_inconsistent_page(self):
+        from node import fetch_peer_chain
+        with patch("node.get", return_value={"start": 1, "chain": [self.chain.genesis_block()]}):
+            with self.assertRaisesRegex(ValueError, "invalid chain page"):
+                fetch_peer_chain("https://peer.test", {"height": 0})
+
+    def test_peer_chain_rejects_invalid_height(self):
+        from node import fetch_peer_chain
+        for height in (True, -1, "1"):
+            with self.subTest(height=height):
+                with self.assertRaisesRegex(ValueError, "invalid chain height"):
+                    fetch_peer_chain("https://peer.test", {"height": height})
+
+
 if __name__ == "__main__":
     unittest.main()
