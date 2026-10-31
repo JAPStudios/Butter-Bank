@@ -175,8 +175,10 @@ class BFTPrimitiveTests(unittest.TestCase):
                 Path(directory) / "anti-equivocation-state.json"
             )
             signer.sign_vote(0, "prevote", self.block_hash)
-            with self.assertRaises(RuntimeError):
-                signer.sign_round_change(1)
+            request = signer.sign_round_change(1)
+            self.assertTrue(verify_round_change(request, self.validators, self.chain_id))
+            with self.assertRaises(ValueError):
+                signer.sign_vote(0, "prevote", self.block_hash)
             signer.close()
         with tempfile.TemporaryDirectory() as directory:
             signer = ConsensusSigner(
@@ -199,14 +201,18 @@ class BFTPrimitiveTests(unittest.TestCase):
                 for key, _ in self.keys_and_records[:3]
             ]
             signer.lock_from_prevotes(prevotes, 0, self.block_hash)
-            with self.assertRaises(RuntimeError):
-                signer.sign_round_change(1)
+            request = signer.sign_round_change(1)
             certificate = [
-                make_round_change(key, self.chain_id, 1, 1, self.set_hash)
-                for key, _ in self.keys_and_records[:3]
+                request,
+                *[
+                    make_round_change(key, self.chain_id, 1, 1, self.set_hash)
+                    for key, _ in self.keys_and_records[1:3]
+                ],
             ]
-            with self.assertRaises(RuntimeError):
-                signer.advance_round(certificate)
+            self.assertEqual(signer.advance_round(certificate), 1)
+            self.assertEqual(signer.locked_block_hash, self.block_hash)
+            with self.assertRaises(ValueError):
+                signer.sign_vote(1, "prevote", "cd" * 32)
             signer.close()
 
     def test_round_change_is_chain_and_validator_set_bound(self):
@@ -1028,10 +1034,11 @@ class LockedRoundRecoveryTests(unittest.TestCase):
             engine = ConsensusEngine(signer, lambda block: block.get("hash"))
             self.assertTrue(engine.receive_proposal(proposal, {"hash": self.new_hash}))
             self.assertEqual(engine.prevote(self.new_hash)["block_hash"], self.new_hash)
+            conflicting_hash = "ef" * 32
             invalid = make_proposal(
-                proposer_key, self.chain_id, 1, 2, self.old_hash, self.set_hash
+                proposer_key, self.chain_id, 1, 2, conflicting_hash, self.set_hash
             )
-            self.assertFalse(engine.receive_proposal(invalid, {"hash": self.old_hash}))
+            self.assertFalse(engine.receive_proposal(invalid, {"hash": conflicting_hash}))
             signer.close()
 
     def test_restart_rejects_tampered_persisted_unlock_certificate(self):
@@ -1060,6 +1067,8 @@ class LockedRoundRecoveryTests(unittest.TestCase):
                 self.keys_and_records[0][0], self.chain_id, self.validators,
                 Path(directory) / "signer.json"
             )
+            signer.sign_round_change(1)
+            signer.advance_round(self._round_change_certificate(1))
             signer.lock_from_prevotes(self._prevote_certificate(1, self.old_hash),
                                       1, self.old_hash)
             signer.sign_round_change(3)
