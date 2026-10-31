@@ -324,6 +324,37 @@ class BFTPrimitiveTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 engine.advance_round()
 
+    def test_locked_state_survives_restart_and_rejects_round_change_certificate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "locked-state.json"
+            key = self.keys_and_records[0][0]
+            signer = ConsensusSigner(key, self.chain_id, self.validators, path)
+            certificate = [
+                make_round_change(item_key, self.chain_id, 1, 1, self.set_hash)
+                for item_key, _ in self.keys_and_records[:3]
+            ]
+            signer.advance_round(certificate)
+            prevotes = [
+                make_vote(item_key, self.chain_id, 1, 1, "prevote",
+                          self.block_hash, self.set_hash)
+                for item_key, _ in self.keys_and_records[:3]
+            ]
+            signer.lock_from_prevotes(prevotes, 1, self.block_hash)
+            signer.close()
+
+            reopened = ConsensusSigner(key, self.chain_id, self.validators, path)
+            self.assertEqual(reopened.current_round, 1)
+            self.assertEqual(reopened.locked_block_hash, self.block_hash)
+            with self.assertRaisesRegex(RuntimeError, "locked validator"):
+                reopened.sign_round_change(2)
+            with self.assertRaisesRegex(RuntimeError, "locked validator"):
+                reopened.advance_round([
+                    make_round_change(item_key, self.chain_id, 1, 2, self.set_hash)
+                    for item_key, _ in self.keys_and_records[:3]
+                ])
+            self.assertEqual(reopened.locked_block_hash, self.block_hash)
+            reopened.close()
+
     def test_http_transport_accepts_signed_proposal_and_vote(self):
         with tempfile.TemporaryDirectory() as directory:
             signer = ConsensusSigner(self.keys_and_records[0][0], self.chain_id,
