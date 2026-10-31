@@ -30,8 +30,8 @@ class BFTAPI(API):
             return super().do_POST()
         try:
             request = self.body()
-            if set(request) - {"valid_round", "valid_round_certificate"}:
-                raise ValueError("proposal request accepts only valid_round and valid_round_certificate")
+            if set(request) - {"block", "valid_round", "valid_round_certificate"}:
+                raise ValueError("proposal request accepts only block and valid-round proof fields")
             chain = self.chain
             key = self.consensus_key
             signer = self.consensus_server.engine.signer
@@ -42,7 +42,11 @@ class BFTAPI(API):
                 self.sendj(409, {"ok": False, "error": "this validator is not the proposer for the current round",
                                  "selected_proposer": selected})
                 return
-            block = chain.build_proposal(proposer)
+            block = request.get("block")
+            if block is None:
+                block = chain.build_proposal(proposer)
+            elif not isinstance(block, dict) or chain.validate_proposal_block(block) is None:
+                raise ValueError("supplied proposal block is invalid for the current finalized chain")
             proposal = make_proposal(
                 key, chain.id, signer.height, self.consensus_server.engine.round,
                 block["hash"], self.consensus_server.engine.signer.validators_hash,
