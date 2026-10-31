@@ -139,6 +139,11 @@ class ConsensusEngine:
                 "block": block,
                 "commit_votes": matching,
             }
+            # Ensure signer state can accept this commit before persisting the chain.
+            try:
+                self.signer.validate_finalization(matching, self.round, block_hash)
+            except ValueError:
+                continue
             # Persist the finalized block before advancing signer height.
             if self.on_finalized is not None:
                 try:
