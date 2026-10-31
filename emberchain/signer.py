@@ -423,7 +423,17 @@ class ConsensusSigner:
             ):
                 raise ValueError("cannot catch up over an invalid commit certificate")
             if self.state.get("lock") not in (None, block_hash):
-                raise ValueError("finalized history conflicts with the persisted lock")
+                valid_round = block.get("valid_round")
+                valid_round_certificate = block.get("valid_round_certificate")
+                locked_round = self.state.get("locked_round")
+                if (not isinstance(valid_round, int) or isinstance(valid_round, bool)
+                        or locked_round is None or valid_round <= locked_round
+                        or valid_round >= round_number
+                        or not verify_prevote_certificate(
+                            valid_round_certificate, records, self.chain_id,
+                            height, valid_round, block_hash,
+                        )):
+                    raise ValueError("finalized history conflicts with the persisted lock")
             for slot, entry in self.state["signed"].items():
                 try:
                     signed_height = int(slot.split(":", 1)[0])
