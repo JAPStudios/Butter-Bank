@@ -53,7 +53,7 @@ The four-node test is a deterministic integration test, not a substitute for for
 
    `PYTHONPATH=emberchain python emberchain/bft_node.py --config config.bft.json`
 
-6. The selected proposer can request a proposal through the local node API using POST /propose with an empty JSON object. Validators automatically prevote only after local block validation. Finality requires more than two-thirds of the admitted voting power.
+6. The selected proposer can request a proposal through the local node API using POST /propose with an empty JSON object. If the proposer is locked on a different block, include `valid_round` and `valid_round_certificate` in the JSON request; the certificate must prove more than two-thirds prevoting power for the proposed block at a round newer than the lock and earlier than the current round. Validators automatically prevote only after local block validation and signer authorization. Finality requires more than two-thirds of the admitted voting power.
 
 This run mode is a development prototype. Signed round-change certificates, automatic timeout requests, and certificate-gated locked-round recovery are implemented. Automatic validator-set transition and revocation activation are not implemented. The node writes the finalized block before advancing signer height; offline signers can catch up by verifying committed certificates. Disk rollback protection still requires trusted monotonic storage or equivalent operational controls. Do not use real funds or deploy a public mainnet with this version.
 
