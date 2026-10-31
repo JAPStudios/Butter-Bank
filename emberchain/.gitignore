@@ -10,3 +10,5 @@ wallets/
 data/
 *.json.lock
 *.consensus.json
+*wallet*.json
+*consensus-state*.json
