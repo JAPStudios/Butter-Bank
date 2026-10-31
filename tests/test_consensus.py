@@ -376,14 +376,23 @@ class BFTPrimitiveTests(unittest.TestCase):
             reopened = ConsensusSigner(key, self.chain_id, self.validators, path)
             self.assertEqual(reopened.current_round, 1)
             self.assertEqual(reopened.locked_block_hash, self.block_hash)
-            with self.assertRaisesRegex(RuntimeError, "locked validator"):
-                reopened.sign_round_change(2)
-            with self.assertRaisesRegex(RuntimeError, "locked validator"):
-                reopened.advance_round([
+            request = reopened.sign_round_change(2)
+            self.assertTrue(verify_round_change(request, self.validators, self.chain_id))
+            self.assertEqual(reopened.advance_round([
+                request,
+                *[
                     make_round_change(item_key, self.chain_id, 1, 2, self.set_hash)
-                    for item_key, _ in self.keys_and_records[:3]
-                ])
+                    for item_key, _ in self.keys_and_records[1:3]
+                ],
+            ]), 2)
             self.assertEqual(reopened.locked_block_hash, self.block_hash)
+            with self.assertRaisesRegex(ValueError, "persisted lock"):
+                reopened.sign_vote(2, "prevote", "cd" * 32)
+            reopened.close()
+            recovered = ConsensusSigner(key, self.chain_id, self.validators, path)
+            self.assertEqual(recovered.current_round, 2)
+            self.assertEqual(recovered.locked_block_hash, self.block_hash)
+            recovered.close()
             reopened.close()
 
     def test_http_transport_accepts_signed_proposal_and_vote(self):
