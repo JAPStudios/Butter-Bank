@@ -701,8 +701,6 @@ class PersistedSignerSlotValidationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "persisted round-change"):
                 ConsensusSigner(key, self.chain_id, self.validators, path)
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class BFTRoundTimeoutLoopTests(unittest.TestCase):
@@ -815,3 +813,6 @@ class BFTRoundBoundsTests(unittest.TestCase):
                     self.keys_and_records[0][0], self.chain_id,
                     self.validators, path
                 )
+
+if __name__ == "__main__":
+    unittest.main()
