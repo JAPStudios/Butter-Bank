@@ -1,6 +1,9 @@
 
 __pycache__/
 .venv/
+.gradle/
+build/
+app/build/
 config.json
 data-*.json
 *-wallet.json
