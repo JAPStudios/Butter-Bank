@@ -168,7 +168,8 @@ def main():
         raise SystemExit("Validator signer height does not match finalized chain height; refusing to sign.")
     def persist_finalized(result):
         ok, message = chain.accept_finalized_block(
-            result["block"], result["round"], result["commit_votes"]
+            result["block"], result["round"], result["commit_votes"],
+            result.get("valid_round"), result.get("valid_round_certificate"),
         )
         if not ok:
             raise RuntimeError(message)
