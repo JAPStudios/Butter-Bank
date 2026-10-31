@@ -232,9 +232,12 @@ def main():
         signer.close()
         raise
 
-    threading.Thread(target=consensus_server.serve_forever, daemon=True).start()
+    consensus_thread = threading.Thread(
+        target=consensus_server.serve_forever, daemon=True
+    )
+    consensus_thread.start()
     timeout_stop = threading.Event()
-    threading.Thread(
+    timeout_thread = threading.Thread(
         target=bft_round_timeout_loop,
         args=(
             consensus_server,
@@ -243,13 +246,15 @@ def main():
             timeout_stop,
         ),
         daemon=True,
-    ).start()
+    )
+    timeout_thread.start()
     peer_sync_stop = threading.Event()
-    threading.Thread(
+    peer_sync_thread = threading.Thread(
         target=bft_peer_sync_loop,
         args=(chain, engine, 10, peer_sync_stop),
         daemon=True,
-    ).start()
+    )
+    peer_sync_thread.start()
     print(f"Biscuits BFT node on {cfg.get('host')}:{cfg.get('port')} "
           f"| chain={chain.id} | height={len(chain.blocks)-1} "
           f"| validators={len(chain.validators)}")
@@ -262,6 +267,9 @@ def main():
         timeout_stop.set()
         peer_sync_stop.set()
         consensus_server.shutdown()
+        timeout_thread.join(timeout=5)
+        peer_sync_thread.join(timeout=5)
+        consensus_thread.join(timeout=5)
         signer.close()
 
 
