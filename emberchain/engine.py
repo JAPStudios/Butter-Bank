@@ -218,6 +218,7 @@ class ConsensusEngine:
         except (ValueError, RuntimeError):
             return None
         self.proposals.clear()
+        self.proposal_metadata.clear()
         self.votes.clear()
         self.round_changes = defaultdict(dict, {
             round_number: entries for round_number, entries in self.round_changes.items()
@@ -232,6 +233,7 @@ class ConsensusEngine:
             raise RuntimeError("a >2/3 signed round-change certificate is required")
         self.round = self.signer.advance_round(certificate)
         self.proposals.clear()
+        self.proposal_metadata.clear()
         self.votes.clear()
         self.round_changes.clear()
         return self.round
