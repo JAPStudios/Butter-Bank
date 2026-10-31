@@ -332,6 +332,38 @@ class BFTChainTests(unittest.TestCase):
             signer.catch_up(chain.blocks[1:])
             self.assertEqual(signer.height, 2)
 
+    def test_signer_catch_up_rolls_back_memory_after_persistence_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            chain = BFTChain(self.cfg, Path(directory) / "chain.json")
+            signer_path = Path(directory) / "offline-signer.json"
+            signer = ConsensusSigner(
+                self.validator_keys[0], self.chain_id, chain.validators,
+                signer_path, initial_height=1
+            )
+            block = chain.build_proposal(select_proposer(chain.validators, 1, 0))
+            keys_by_public = {
+                key.public_key().public_bytes_raw().hex(): key
+                for key in self.validator_keys
+            }
+            votes = [
+                make_vote(keys_by_public[item["public_key"]], self.chain_id, 1, 0,
+                          "precommit", block["hash"], chain.validators_hash)
+                for item in chain.validators[:3]
+            ]
+            self.assertTrue(chain.accept_finalized_block(block, 0, votes)[0])
+            original_save = signer._save
+            signer._save = lambda: (_ for _ in ()).throw(
+                OSError("simulated signer-state disk failure")
+            )
+            with self.assertRaisesRegex(OSError, "simulated signer-state"):
+                signer.catch_up(chain.blocks[1:])
+            self.assertEqual(signer.height, 1)
+            self.assertEqual(json.loads(signer_path.read_text())["height"], 1)
+            signer._save = original_save
+            signer.catch_up(chain.blocks[1:])
+            self.assertEqual(signer.height, 2)
+            signer.close()
+
     def test_offline_signer_refuses_catch_up_over_conflicting_local_vote(self):
         with tempfile.TemporaryDirectory() as directory:
             chain = BFTChain(self.cfg, Path(directory) / "chain.json")

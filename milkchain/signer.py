@@ -442,13 +442,20 @@ class ConsensusSigner:
                 if (signed_height == height and slot.split(":")[2] == "precommit"
                         and entry.get("block_hash") != block_hash):
                     raise ValueError("finalized history conflicts with a locally signed precommit")
+            previous_state = dict(self.state)
             self.state["height"] = height + 1
             self.state["round"] = 0
             self.state["lock"] = None
             self.state["locked_round"] = None
             self.state["signed_round_changes"] = {}
             self.state["unlock_authorization"] = None
-            self._save()
+            try:
+                self._save()
+            except Exception:
+                # A failed durable write must not leave this process ahead of
+                # the on-disk signer state. A later sync cycle can safely retry.
+                self.state = previous_state
+                raise
 
     @_synchronized
     def validate_finalization(self, votes, round_number, block_hash):
