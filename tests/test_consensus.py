@@ -17,6 +17,7 @@ from consensus import (
     validator_set_hash,
     MAX_ROUND,
     verify_commit_certificate,
+    verify_prevote_certificate,
     verify_proposal,
     verify_vote,
     verify_round_change,
@@ -89,6 +90,36 @@ class BFTPrimitiveTests(unittest.TestCase):
             self.validators, self.chain_id
         ))
 
+
+    def test_prevote_certificate_requires_unique_supermajority_for_exact_round_and_block(self):
+        votes = [
+            make_vote(key, self.chain_id, 1, 2, "prevote",
+                      self.block_hash, self.set_hash)
+            for key, _ in self.keys_and_records[:3]
+        ]
+        self.assertTrue(verify_prevote_certificate(
+            votes, self.validators, self.chain_id, 1, 2, self.block_hash
+        ))
+        self.assertFalse(verify_prevote_certificate(
+            votes[:2], self.validators, self.chain_id, 1, 2, self.block_hash
+        ))
+        self.assertFalse(verify_prevote_certificate(
+            votes + [votes[0]], self.validators, self.chain_id, 1, 2, self.block_hash
+        ))
+        self.assertFalse(verify_prevote_certificate(
+            votes, self.validators, self.chain_id, 1, 1, self.block_hash
+        ))
+        self.assertFalse(verify_prevote_certificate(
+            votes, self.validators, self.chain_id, 1, 2, "cd" * 32
+        ))
+        wrong_step = [
+            make_vote(key, self.chain_id, 1, 2, "precommit",
+                      self.block_hash, self.set_hash)
+            for key, _ in self.keys_and_records[:3]
+        ]
+        self.assertFalse(verify_prevote_certificate(
+            wrong_step, self.validators, self.chain_id, 1, 2, self.block_hash
+        ))
 
     def test_round_change_certificate_requires_authenticated_supermajority(self):
         messages = [
