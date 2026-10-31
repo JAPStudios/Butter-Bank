@@ -20,7 +20,7 @@ class BFTChain(Chain):
             raise ValueError("BFTChain requires consensus='bft'")
         if cfg.get("block_reward") != 0:
             raise ValueError(
-                "BFT block issuance is disabled until Biscuits supply and issuance rules are defined"
+                "BFT development configuration requires block_reward=0"
             )
         chain_path = Path(path)
         if chain_path.is_symlink():
