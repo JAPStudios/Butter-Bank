@@ -206,18 +206,31 @@ def main():
     engine = ConsensusEngine(
         signer, chain.validate_proposal_block, on_finalized=persist_finalized
     )
-    consensus_server = ConsensusHTTPServer(
-        engine,
-        peers=cfg.get("consensus_peers", []),
-        host=cfg.get("consensus_host", "127.0.0.1"),
-        port=int(cfg.get("consensus_port", 8334)),
-        tls_certfile=cfg.get("consensus_tls_certfile"),
-        tls_keyfile=cfg.get("consensus_tls_keyfile"),
-    )
+    try:
+        consensus_server = ConsensusHTTPServer(
+            engine,
+            peers=cfg.get("consensus_peers", []),
+            host=cfg.get("consensus_host", "127.0.0.1"),
+            port=int(cfg.get("consensus_port", 8334)),
+            tls_certfile=cfg.get("consensus_tls_certfile"),
+            tls_keyfile=cfg.get("consensus_tls_keyfile"),
+        )
+    except Exception:
+        signer.close()
+        raise
     BFTAPI.chain = chain
     BFTAPI.peers = chain.peers
     BFTAPI.consensus_server = consensus_server
     BFTAPI.consensus_key = key
+
+    try:
+        http_server = ThreadingHTTPServer(
+            (api_host, int(cfg.get("port", 8333))), BFTAPI
+        )
+    except Exception:
+        consensus_server.server.server_close()
+        signer.close()
+        raise
 
     threading.Thread(target=consensus_server.serve_forever, daemon=True).start()
     timeout_stop = threading.Event()
@@ -237,9 +250,6 @@ def main():
         args=(chain, engine, 10, peer_sync_stop),
         daemon=True,
     ).start()
-    http_server = ThreadingHTTPServer(
-        (api_host, int(cfg.get("port", 8333))), BFTAPI
-    )
     print(f"Biscuits BFT node on {cfg.get('host')}:{cfg.get('port')} "
           f"| chain={chain.id} | height={len(chain.blocks)-1} "
           f"| validators={len(chain.validators)}")
