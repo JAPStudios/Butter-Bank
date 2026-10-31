@@ -11,7 +11,7 @@ import tempfile
 import threading
 from pathlib import Path
 
-from consensus import (make_vote, make_round_change, normalize_validator_set, validator_set_hash, verify_vote, verify_round_change, verify_round_change_certificate, verify_commit_certificate, _is_hex, MAX_ROUND)
+from consensus import (make_vote, make_round_change, normalize_validator_set, validator_set_hash, verify_vote, verify_round_change, verify_round_change_certificate, verify_prevote_certificate, verify_commit_certificate, _is_hex, MAX_ROUND)
 
 
 def _synchronized(method):
@@ -279,29 +279,22 @@ class ConsensusSigner:
             try:
                 os.unlink(name)
             except OSError:
-                pass
-            raise
-
-    @_synchronized
+                @_synchronized
     def lock_from_prevotes(self, votes, round_number, block_hash):
-        if not isinstance(round_number, int) or isinstance(round_number, bool) or round_number < 0:
-            raise ValueError("round_number must be a non-negative integer")
+        """Persist a lock only from a verified >2/3 prevote certificate."""
+        if (not isinstance(round_number, int) or isinstance(round_number, bool)
+                or round_number < 0 or round_number > MAX_ROUND):
+            raise ValueError("round_number must be a 32-bit non-negative integer")
         if round_number != self.current_round:
             raise ValueError("prevote quorum is not for the current persisted round")
-        seen, power = set(), 0
-        records = [{"public_key": k, "voting_power": v} for k, v in self.validators.items()]
-        for vote in votes:
-            if not verify_vote(vote, records, self.chain_id):
-                raise ValueError("invalid prevote")
-            key = vote["validator"]
-            if (vote["height"] != self.height or vote["round"] != round_number
-                    or vote["step"] != "prevote" or vote["block_hash"] != block_hash
-                    or key in seen):
-                raise ValueError("prevote does not match lock target or is duplicated")
-            seen.add(key)
-            power += self.validators[key]
-        if power * 3 <= sum(self.validators.values()) * 2:
-            raise ValueError("prevote quorum must exceed two-thirds")
+        records = [
+            {"public_key": key, "voting_power": power}
+            for key, power in self.validators.items()
+        ]
+        if not verify_prevote_certificate(
+            votes, records, self.chain_id, self.height, round_number, block_hash
+        ):
+            raise ValueError("invalid or insufficient prevote certificate")
         if self.state["lock"] not in (None, block_hash):
             raise ValueError("this signer version never unlocks within a height")
         locked_round = self.state.get("locked_round")
@@ -311,7 +304,6 @@ class ConsensusSigner:
         self.state["locked_round"] = round_number
         self._save()
 
-    @_synchronized
     def sign_vote(self, round_number, step, block_hash):
         if round_number != self.current_round:
             raise ValueError("refusing to sign outside the current persisted round")
