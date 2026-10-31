@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Sign and submit an Emberchain transaction."""
+"""Sign and submit a Milkchain transaction."""
 import argparse,json,urllib.request,urllib.error
 from pathlib import Path
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from cryptography.hazmat.primitives import serialization
+from wallet import read_wallet
 
 def canon(x): return json.dumps(x,sort_keys=True,separators=(',',':')).encode()
 def get_json(url):
@@ -25,15 +24,9 @@ def main():
     except ValueError: p.error('--to must be a 32-byte hexadecimal public key')
     if len(recipient)!=32: p.error('--to must be a 32-byte hexadecimal public key')
     try:
-        w=json.loads(Path(a.wallet).read_text())
-        private=bytes.fromhex(w['private_key'])
-        public=bytes.fromhex(w['public_key'])
-        if len(private)!=32 or len(public)!=32: raise ValueError('keys must be 32 bytes')
-        key=Ed25519PrivateKey.from_private_bytes(private)
-        derived=key.public_key().public_bytes(serialization.Encoding.Raw,serialization.PublicFormat.Raw)
-        if derived!=public: raise ValueError('wallet public key does not match private key')
-    except (OSError,ValueError,KeyError,TypeError,json.JSONDecodeError) as e:
-        p.error(f'invalid wallet file: {e}')
+        key, public_hex = read_wallet(a.wallet)
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        p.error(f'invalid wallet file: {exc}')
     node=a.node.rstrip('/')
     try:
         status=get_json(node+'/status')
@@ -47,12 +40,12 @@ def main():
     nonce=a.nonce
     if nonce is None:
         try:
-            nonce=balances['nonces'].get(public.hex(),0)+1
-            pending=[item['nonce'] for item in mempool['transactions'] if item.get('sender')==public.hex() and isinstance(item.get('nonce'),int) and not isinstance(item.get('nonce'),bool)]
+            nonce=balances['nonces'].get(public_hex,0)+1
+            pending=[item['nonce'] for item in mempool['transactions'] if item.get('sender')==public_hex and isinstance(item.get('nonce'),int) and not isinstance(item.get('nonce'),bool)]
             if pending: nonce=max(nonce,max(pending)+1)
         except (KeyError,TypeError): p.error('node returned invalid nonce or mempool data')
     if not isinstance(nonce,int) or isinstance(nonce,bool) or nonce<1: p.error('--nonce must be a positive integer')
-    tx={'chain_id':chain_id,'sender':public.hex(),'recipient':a.to.lower(),'amount':a.amount,'fee':a.fee,'nonce':nonce}
+    tx={'chain_id':chain_id,'sender':public_hex,'recipient':a.to.lower(),'amount':a.amount,'fee':a.fee,'nonce':nonce}
     tx['signature']=key.sign(canon(tx)).hex()
     req=urllib.request.Request(node+'/tx',data=canon(tx),headers={'Content-Type':'application/json','Accept':'application/json'},method='POST')
     try:
