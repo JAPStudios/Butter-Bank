@@ -876,5 +876,77 @@ class BFTRoundBoundsTests(unittest.TestCase):
                     self.validators, path
                 )
 
+
+class ValidRoundProposalTests(unittest.TestCase):
+    def setUp(self):
+        self.keys_and_records = [validator() for _ in range(4)]
+        self.validators = [record for _, record in self.keys_and_records]
+        self.chain_id = "biscuits-valid-round-proposal-test"
+        self.block_hash = "ab" * 32
+        self.set_hash = validator_set_hash(self.validators)
+
+    def _proposal(self, valid_round, certificate):
+        proposer = select_proposer(self.validators, 1, 2)
+        key = next(key for key, record in self.keys_and_records
+                   if record["public_key"] == proposer)
+        return make_proposal(
+            key, self.chain_id, 1, 2, self.block_hash, self.set_hash,
+            valid_round, certificate,
+        )
+
+    def test_proposal_binds_and_verifies_exact_prior_round_prevote_certificate(self):
+        certificate = [
+            make_vote(key, self.chain_id, 1, 1, "prevote",
+                      self.block_hash, self.set_hash)
+            for key, _ in self.keys_and_records[:3]
+        ]
+        proposal = self._proposal(1, certificate)
+        self.assertTrue(verify_proposal(proposal, self.validators, self.chain_id))
+        tampered = dict(proposal)
+        tampered["valid_round"] = 0
+        self.assertFalse(verify_proposal(tampered, self.validators, self.chain_id))
+        tampered = dict(proposal)
+        tampered["valid_round_certificate"] = certificate[:2]
+        self.assertFalse(verify_proposal(tampered, self.validators, self.chain_id))
+
+    def test_proposal_rejects_future_round_duplicate_signers_and_wrong_block(self):
+        valid = [
+            make_vote(key, self.chain_id, 1, 1, "prevote",
+                      self.block_hash, self.set_hash)
+            for key, _ in self.keys_and_records[:3]
+        ]
+        duplicate = [valid[0], valid[0], valid[1]]
+        self.assertFalse(verify_proposal(
+            self._proposal(1, duplicate), self.validators, self.chain_id
+        ))
+        wrong_block = [
+            make_vote(key, self.chain_id, 1, 1, "prevote",
+                      "cd" * 32, self.set_hash)
+            for key, _ in self.keys_and_records[:3]
+        ]
+        self.assertFalse(verify_proposal(
+            self._proposal(1, wrong_block), self.validators, self.chain_id
+        ))
+        with self.assertRaises(ValueError):
+            self._proposal(2, valid)
+
+    def test_proposal_rejects_missing_or_unexpected_valid_round_proof(self):
+        proposer = select_proposer(self.validators, 1, 2)
+        key = next(key for key, record in self.keys_and_records
+                   if record["public_key"] == proposer)
+        with self.assertRaises(ValueError):
+            make_proposal(key, self.chain_id, 1, 2, self.block_hash,
+                          self.set_hash, 1, [])
+        proposal = make_proposal(key, self.chain_id, 1, 2,
+                                 self.block_hash, self.set_hash)
+        tampered = dict(proposal)
+        tampered["valid_round_certificate"] = [
+            make_vote(item_key, self.chain_id, 1, 1, "prevote",
+                      self.block_hash, self.set_hash)
+            for item_key, _ in self.keys_and_records[:3]
+        ]
+        self.assertFalse(verify_proposal(tampered, self.validators, self.chain_id))
+
+
 if __name__ == "__main__":
     unittest.main()
