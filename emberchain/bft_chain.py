@@ -214,6 +214,8 @@ class BFTChain(Chain):
                 finalized["valid_round_certificate"] = list(valid_round_certificate or [])
             elif valid_round_certificate not in (None, [], ()):
                 return False, "valid-round certificate supplied without valid_round"
+            if len(self.blocks) > 1 and self.blocks[-1] == finalized:
+                return True, "BFT block already finalized"
             if not self.valid_chain(self.blocks + [finalized]):
                 return False, "invalid BFT-finalized block or commit certificate"
             previous_blocks = self.blocks
