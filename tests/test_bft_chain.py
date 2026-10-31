@@ -250,6 +250,16 @@ class BFTChainTests(unittest.TestCase):
                 self.assertEqual(len({chain.blocks[-1]["hash"] for chain in chains}), 1)
                 self.assertTrue(all(signer.height == 2 for signer in signers))
                 self.assertTrue(all(signer.locked_block_hash is None for signer in signers))
+                self.assertEqual(chains[0].blocks[-1]["valid_round"], 1)
+                offline = ConsensusSigner(
+                    self.validator_keys[0], self.chain_id, chains[0].validators,
+                    Path(directory) / "offline-recovery-signer.json",
+                )
+                offline.lock_from_prevotes(old_certificate, 0, old_hash)
+                offline.catch_up(chains[0].blocks[1:])
+                self.assertEqual(offline.height, 2)
+                self.assertIsNone(offline.locked_block_hash)
+                offline.close()
             finally:
                 for server in servers:
                     server.shutdown()
