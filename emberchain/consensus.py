@@ -1,9 +1,10 @@
 """Stake-free BFT consensus primitives for Biscuits.
 
-This module verifies validator signatures, proposal commitments and >2/3
-commit certificates. It deliberately does not implement validator admission,
-network transport, persistent consensus locks, or a complete round state
-machine; those are required before production deployment.
+This module defines canonical, domain-separated Ed25519 messages and verifies
+validator sets, proposals, votes, round-change certificates, and commit
+certificates. Persistent signing state, coordination, admission, and transport
+are implemented in their dedicated modules. The complete production protocol
+still requires formally specified safe locked-round recovery and validation.
 """
 from __future__ import annotations
 
