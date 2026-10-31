@@ -1,9 +1,11 @@
+import io
 import json
 import tempfile
 import threading
 import unittest
 import urllib.request
 from http.server import ThreadingHTTPServer
+from email.message import Message
 from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -248,6 +250,44 @@ class ChainValidationTests(unittest.TestCase):
         self.assertTrue(result["ok"], result)
         self.assertEqual(self.chain.blocks, remote.blocks)
 
+
+class RequestBodyValidationTests(unittest.TestCase):
+    def make_handler(self, body, *lengths, transfer_encoding=None):
+        handler = API.__new__(API)
+        handler.headers = Message()
+        for length in lengths:
+            handler.headers.add_header('Content-Length', length)
+        if transfer_encoding is not None:
+            handler.headers.add_header('Transfer-Encoding', transfer_encoding)
+        handler.rfile = io.BytesIO(body)
+        return handler
+
+    def test_accepts_complete_json_object(self):
+        body = b'{"transaction":{}}'
+        self.assertEqual(self.make_handler(body, str(len(body))).body(),
+                         {'transaction': {}})
+
+    def test_rejects_missing_or_duplicate_content_length(self):
+        for lengths in ((), ('2', '2')):
+            with self.subTest(lengths=lengths):
+                with self.assertRaisesRegex(ValueError, 'exactly one Content-Length'):
+                    self.make_handler(b'{}', *lengths).body()
+
+    def test_rejects_transfer_encoding(self):
+        with self.assertRaisesRegex(ValueError, 'Transfer-Encoding'):
+            self.make_handler(b'{}', '2', transfer_encoding='chunked').body()
+
+    def test_rejects_non_decimal_and_out_of_range_lengths(self):
+        for length in ('+2', ' 2', '2, 2', '٢', '0', '1000001'):
+            with self.subTest(length=length):
+                with self.assertRaises(ValueError):
+                    self.make_handler(b'{}', length).body()
+
+    def test_rejects_truncated_body_and_non_object_json(self):
+        with self.assertRaisesRegex(ValueError, 'incomplete request body'):
+            self.make_handler(b'{}', '3').body()
+        with self.assertRaisesRegex(ValueError, 'JSON request body must be an object'):
+            self.make_handler(b'[]', '2').body()
 
 if __name__ == "__main__":
     unittest.main()

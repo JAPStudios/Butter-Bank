@@ -216,12 +216,18 @@ class API(BaseHTTPRequestHandler):
     def sendj(self,code,obj):
         b=canon(obj); self.send_response(code); self.send_header('Content-Type','application/json'); self.send_header('Content-Length',str(len(b))); self.end_headers(); self.wfile.write(b)
     def body(self):
-        raw_length=self.headers.get('Content-Length')
-        if raw_length is None: raise ValueError('Content-Length is required')
-        try: n=int(raw_length)
-        except ValueError: raise ValueError('invalid Content-Length')
+        lengths=self.headers.get_all('Content-Length', [])
+        if len(lengths)!=1: raise ValueError('exactly one Content-Length is required')
+        if self.headers.get_all('Transfer-Encoding', []):
+            raise ValueError('Transfer-Encoding is not supported')
+        raw_length=lengths[0]
+        if not isinstance(raw_length,str) or not raw_length.isascii() or not raw_length.isdecimal():
+            raise ValueError('invalid Content-Length')
+        n=int(raw_length)
         if n<1 or n>1000000: raise ValueError('invalid body size')
-        value=json.loads(self.rfile.read(n))
+        raw=self.rfile.read(n)
+        if len(raw)!=n: raise ValueError('incomplete request body')
+        value=json.loads(raw)
         if not isinstance(value,dict): raise ValueError('JSON request body must be an object')
         return value
     def do_GET(self):
