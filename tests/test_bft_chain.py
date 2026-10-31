@@ -123,7 +123,8 @@ class BFTChainTests(unittest.TestCase):
 
                 def persist(result, target=chain):
                     ok, message = target.accept_finalized_block(
-                        result["block"], result["round"], result["commit_votes"]
+                        result["block"], result["round"], result["commit_votes"],
+                        result.get("valid_round"), result.get("valid_round_certificate"),
                     )
                     if not ok:
                         raise RuntimeError(message)
@@ -203,7 +204,8 @@ class BFTChainTests(unittest.TestCase):
 
                 def persist(result, target=chain):
                     ok, message = target.accept_finalized_block(
-                        result["block"], result["round"], result["commit_votes"]
+                        result["block"], result["round"], result["commit_votes"],
+                        result.get("valid_round"), result.get("valid_round_certificate"),
                     )
                     if not ok:
                         raise RuntimeError(message)
@@ -520,7 +522,8 @@ class BFTChainTests(unittest.TestCase):
 
                 def persist(result, target=chain):
                     ok, message = target.accept_finalized_block(
-                        result["block"], result["round"], result["commit_votes"]
+                        result["block"], result["round"], result["commit_votes"],
+                        result.get("valid_round"), result.get("valid_round_certificate"),
                     )
                     if not ok:
                         raise RuntimeError(message)
@@ -595,7 +598,8 @@ class BFTChainTests(unittest.TestCase):
 
                 def persist(result, target=chain):
                     ok, message = target.accept_finalized_block(
-                        result["block"], result["round"], result["commit_votes"]
+                        result["block"], result["round"], result["commit_votes"],
+                        result.get("valid_round"), result.get("valid_round_certificate"),
                     )
                     if not ok:
                         raise RuntimeError(message)
