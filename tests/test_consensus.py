@@ -1041,6 +1041,27 @@ class LockedRoundRecoveryTests(unittest.TestCase):
             self.assertFalse(engine.receive_proposal(invalid, {"hash": conflicting_hash}))
             signer.close()
 
+    def test_unlock_authorization_expires_when_validator_advances_again(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "signer.json"
+            key = self.keys_and_records[0][0]
+            signer = ConsensusSigner(key, self.chain_id, self.validators, path)
+            signer.lock_from_prevotes(self._prevote_certificate(0, self.old_hash),
+                                      0, self.old_hash)
+            signer.sign_round_change(2)
+            signer.advance_round(self._round_change_certificate(2))
+            signer.authorize_unlock(
+                1, 2, self.new_hash, self._prevote_certificate(1, self.new_hash)
+            )
+            signer.sign_round_change(3)
+            signer.advance_round(self._round_change_certificate(3))
+            self.assertIsNone(signer.state["unlock_authorization"])
+            signer.close()
+            reopened = ConsensusSigner(key, self.chain_id, self.validators, path)
+            with self.assertRaisesRegex(ValueError, "persisted lock"):
+                reopened.sign_vote(3, "prevote", self.new_hash)
+            reopened.close()
+
     def test_restart_rejects_tampered_persisted_unlock_certificate(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "signer.json"
