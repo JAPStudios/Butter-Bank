@@ -98,7 +98,8 @@ class ConsensusSigner:
             ]
             for slot, message in self.state["signed_round_changes"].items():
                 if (not isinstance(slot, str) or not slot.isdigit()
-                        or int(slot) < 1 or not isinstance(message, dict)
+                        or str(int(slot)) != slot or int(slot) < 1
+                        or int(slot) > MAX_ROUND or not isinstance(message, dict)
                         or not verify_round_change(message, validator_records, chain_id)
                         or message.get("validator") != self.public_key
                         or message.get("height") != height
@@ -131,7 +132,8 @@ class ConsensusSigner:
                     signed_height, signed_round = int(parts[0]), int(parts[1])
                 except ValueError:
                     raise ValueError("invalid persisted signing slot")
-                if (signed_height < 1 or signed_round < 0
+                if (slot != f"{signed_height}:{signed_round}:{parts[2]}"
+                        or signed_height < 1 or signed_height > height or signed_round < 0
                         or (signed_height == height and signed_round > self.state["round"])
                         or parts[2] not in ("prevote", "precommit")
                         or not _is_hex(entry.get("block_hash"), 32)
