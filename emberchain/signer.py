@@ -441,20 +441,35 @@ class ConsensusSigner:
             self._save()
 
     @_synchronized
-    def finalize(self, votes, round_number, block_hash):
-        records = [{"public_key": k, "voting_power": v} for k, v in self.validators.items()]
+    def validate_finalization(self, votes, round_number, block_hash):
+        """Preflight a commit certificate before the chain persistence callback."""
+        records = [
+            {"public_key": key, "voting_power": power}
+            for key, power in self.validators.items()
+        ]
         if round_number != self.current_round:
             raise ValueError("commit certificate is not for the current persisted round")
-        if not verify_commit_certificate(votes, records, self.chain_id,
-                                         self.height, round_number, block_hash):
+        if not verify_commit_certificate(
+            votes, records, self.chain_id, self.height, round_number, block_hash
+        ):
             raise ValueError("invalid commit certificate")
         if self.state["lock"] not in (None, block_hash):
-            raise ValueError("finalized block conflicts with the persisted lock")
+            authorization = self.state.get("unlock_authorization")
+            if (not isinstance(authorization, dict)
+                    or authorization.get("target_round") != round_number
+                    or authorization.get("block_hash") != block_hash):
+                raise ValueError("finalized block conflicts with the persisted lock")
         if self._has_conflicting_precommit(self.height, block_hash):
             raise ValueError("finalized block conflicts with a locally signed precommit")
+        return True
+
+    @_synchronized
+    def finalize(self, votes, round_number, block_hash):
+        self.validate_finalization(votes, round_number, block_hash)
         self.state["height"] += 1
         self.state["round"] = 0
         self.state["lock"] = None
         self.state["locked_round"] = None
         self.state["signed_round_changes"] = {}
+        self.state["unlock_authorization"] = None
         self._save()
