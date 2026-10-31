@@ -246,8 +246,8 @@ class BFTChainTests(unittest.TestCase):
                     "all four locked validators should recover and finalize the same block",
                 )
                 self.assertEqual(len({chain.blocks[-1]["hash"] for chain in chains}), 1)
-                self.assertTrue(all(signer.locked_block_hash == block["hash"]
-                                    for signer in signers))
+                self.assertTrue(all(signer.height == 2 for signer in signers))
+                self.assertTrue(all(signer.locked_block_hash is None for signer in signers))
             finally:
                 for server in servers:
                     server.shutdown()
