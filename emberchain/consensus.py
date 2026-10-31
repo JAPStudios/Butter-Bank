@@ -91,23 +91,37 @@ def select_proposer(
 
 
 def proposal_signing_bytes(
-    chain_id: str, height: int, round_number: int, block_hash: str, validators_hash: str
+    chain_id: str, height: int, round_number: int, block_hash: str,
+    validators_hash: str, valid_round: int | None = None,
+    valid_round_certificate: Sequence[Mapping[str, object]] = (),
 ) -> bytes:
     if not isinstance(chain_id, str) or not chain_id.strip():
         raise ValueError("chain_id must be non-empty")
     if not isinstance(height, int) or isinstance(height, bool) or height < 1:
         raise ValueError("height must be positive")
-    if not isinstance(round_number, int) or isinstance(round_number, bool) or round_number < 0 or round_number > MAX_ROUND:
+    if (not isinstance(round_number, int) or isinstance(round_number, bool)
+            or round_number < 0 or round_number > MAX_ROUND):
         raise ValueError("round_number must be a 32-bit non-negative integer")
     if not _is_hex(block_hash, 32) or not _is_hex(validators_hash, 32):
         raise ValueError("block_hash and validators_hash must be 32-byte hex")
+    if valid_round is not None and (
+        not isinstance(valid_round, int) or isinstance(valid_round, bool)
+        or valid_round < 0 or valid_round >= round_number
+    ):
+        raise ValueError("valid_round must be earlier than the proposal round")
+    if not isinstance(valid_round_certificate, Sequence) or isinstance(valid_round_certificate, (str, bytes)):
+        raise ValueError("valid_round_certificate must be a sequence")
+    if (valid_round is None) != (len(valid_round_certificate) == 0):
+        raise ValueError("valid-round metadata and certificate must be supplied together")
     return canonical_json({
         "chain_id": chain_id,
         "height": height,
         "round": round_number,
         "block_hash": block_hash.lower(),
         "validator_set_hash": validators_hash.lower(),
-        "message": "biscuits/bft/proposal/v1",
+        "valid_round": valid_round,
+        "valid_round_certificate": list(valid_round_certificate),
+        "message": "biscuits/bft/proposal/v2",
     })
 
 
@@ -118,10 +132,13 @@ def make_proposal(
     round_number: int,
     block_hash: str,
     validators_hash: str,
+    valid_round: int | None = None,
+    valid_round_certificate: Sequence[Mapping[str, object]] = (),
 ) -> dict[str, object]:
     public_key = private_key.public_key().public_bytes_raw().hex()
     message = proposal_signing_bytes(
-        chain_id, height, round_number, block_hash, validators_hash
+        chain_id, height, round_number, block_hash, validators_hash,
+        valid_round, valid_round_certificate,
     )
     return {
         "chain_id": chain_id,
@@ -129,6 +146,8 @@ def make_proposal(
         "round": round_number,
         "block_hash": block_hash.lower(),
         "validator_set_hash": validators_hash.lower(),
+        "valid_round": valid_round,
+        "valid_round_certificate": list(valid_round_certificate),
         "proposer": public_key,
         "signature": private_key.sign(message).hex(),
     }
@@ -142,7 +161,8 @@ def verify_proposal(
     try:
         if set(proposal) != {
             "chain_id", "height", "round", "block_hash",
-            "validator_set_hash", "proposer", "signature",
+            "validator_set_hash", "valid_round", "valid_round_certificate",
+            "proposer", "signature",
         }:
             return False
         normalized = normalize_validator_set(validators)
@@ -157,11 +177,24 @@ def verify_proposal(
         if (not isinstance(proposal["block_hash"], str)
                 or proposal["block_hash"] != proposal["block_hash"].lower()):
             return False
+        valid_round = proposal["valid_round"]
+        certificate = proposal["valid_round_certificate"]
+        if valid_round is None:
+            if certificate != []:
+                return False
+        else:
+            if (not isinstance(valid_round, int) or isinstance(valid_round, bool)
+                    or valid_round < 0 or valid_round >= proposal["round"]
+                    or not verify_prevote_certificate(
+                        certificate, validators, expected_chain_id,
+                        proposal["height"], valid_round, proposal["block_hash"],
+                    )):
+                return False
         if proposer != select_proposer(validators, proposal["height"], proposal["round"]):
             return False
         message = proposal_signing_bytes(
             expected_chain_id, proposal["height"], proposal["round"],
-            proposal["block_hash"], expected_set_hash,
+            proposal["block_hash"], expected_set_hash, valid_round, certificate,
         )
         if (not _is_hex(proposal["signature"], 64)
                 or proposal["signature"] != proposal["signature"].lower()):
@@ -172,7 +205,6 @@ def verify_proposal(
         return True
     except (ValueError, TypeError, KeyError, InvalidSignature):
         return False
-
 
 def vote_signing_bytes(
     chain_id: str, height: int, round_number: int, step: str,
