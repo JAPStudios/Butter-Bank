@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sign and submit an Milkchain transaction."""
+"""Sign and submit a Milkchain transaction."""
 import argparse,json,urllib.request,urllib.error
 from pathlib import Path
 from wallet import read_wallet
