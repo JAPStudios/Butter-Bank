@@ -344,6 +344,53 @@ def verify_round_change_certificate(messages: Sequence[Mapping[str, object]],
         return False
 
 
+
+def verify_prevote_certificate(
+    votes: Sequence[Mapping[str, object]],
+    validators: Sequence[Mapping[str, object]],
+    expected_chain_id: str,
+    height: int,
+    round_number: int,
+    block_hash: str,
+) -> bool:
+    """Verify a unique >2/3 prevote certificate for one block and round.
+
+    This proves that a supermajority prevoted the block; it does not by itself
+    authorize a signer to discard a lock. Unlock policy must additionally
+    compare this valid round with the signer's persisted locked round.
+    """
+    try:
+        if (not isinstance(height, int) or isinstance(height, bool) or height < 1
+                or not isinstance(round_number, int) or isinstance(round_number, bool)
+                or round_number < 0 or round_number > MAX_ROUND
+                or not _is_hex(block_hash, 32)):
+            return False
+        if not isinstance(votes, Sequence) or isinstance(votes, (str, bytes)):
+            return False
+        normalized = normalize_validator_set(validators)
+        expected_set_hash = validator_set_hash(validators)
+        seen: set[str] = set()
+        signed_power = 0
+        for vote in votes:
+            if not verify_vote(vote, validators, expected_chain_id):
+                return False
+            if (
+                vote["height"] != height or vote["round"] != round_number
+                or vote["step"] != "prevote"
+                or vote["block_hash"] != block_hash.lower()
+                or vote["validator_set_hash"] != expected_set_hash
+            ):
+                return False
+            key = vote["validator"]
+            if key in seen:
+                return False
+            seen.add(key)
+            signed_power += normalized[key]
+        return signed_power * 3 > sum(normalized.values()) * 2
+    except (ValueError, TypeError, KeyError):
+        return False
+
+
 def verify_commit_certificate(
     votes: Sequence[Mapping[str, object]],
     validators: Sequence[Mapping[str, object]],
