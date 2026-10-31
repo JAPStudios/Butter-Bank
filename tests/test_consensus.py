@@ -596,6 +596,65 @@ class BFTPrimitiveTests(unittest.TestCase):
             self.assertEqual(signer.height, 2)
             self.assertEqual(len(calls), 2)
 
+    def test_commit_retries_after_transient_signer_persistence_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            signer = ConsensusSigner(
+                self.keys_and_records[0][0], self.chain_id, self.validators,
+                Path(directory) / "signer.json"
+            )
+            persisted = []
+            engine = ConsensusEngine(
+                signer, lambda block: block.get("hash"),
+                on_finalized=lambda result: persisted.append(result["block_hash"]),
+            )
+            proposer_key = next(
+                key for key, record in self.keys_and_records
+                if record["public_key"] == select_proposer(self.validators, 1, 0)
+            )
+            block = {"hash": self.block_hash}
+            proposal = make_proposal(
+                proposer_key, self.chain_id, 1, 0, self.block_hash, self.set_hash
+            )
+            self.assertTrue(engine.receive_proposal(proposal, block))
+            local_prevote = engine.prevote(self.block_hash)
+            prevotes = [local_prevote] + [
+                make_vote(key, self.chain_id, 1, 0, "prevote",
+                          self.block_hash, self.set_hash)
+                for key, _ in self.keys_and_records[1:3]
+            ]
+            precommit = None
+            for vote in prevotes:
+                action = engine.receive_vote(vote)
+                if action is not None:
+                    precommit = action
+            self.assertIsNotNone(precommit)
+
+            original_save = signer._save
+            attempts = [0]
+            def flaky_save():
+                attempts[0] += 1
+                if attempts[0] == 1:
+                    raise OSError("temporary signer-state persistence failure")
+                original_save()
+            signer._save = flaky_save
+
+            precommits = [precommit] + [
+                make_vote(key, self.chain_id, 1, 0, "precommit",
+                          self.block_hash, self.set_hash)
+                for key, _ in self.keys_and_records[1:3]
+            ]
+            for vote in precommits:
+                engine.receive_vote(vote)
+            self.assertEqual(signer.height, 1)
+            self.assertEqual(signer.locked_block_hash, self.block_hash)
+            self.assertEqual(len(persisted), 1)
+
+            engine.receive_vote(precommits[-1])
+            self.assertEqual(signer.height, 2)
+            self.assertIsNone(signer.locked_block_hash)
+            self.assertEqual(len(persisted), 2)
+            signer.close()
+
     def test_concurrent_signing_returns_one_persisted_vote(self):
         key, _ = self.keys_and_records[0]
         with tempfile.TemporaryDirectory() as directory:
