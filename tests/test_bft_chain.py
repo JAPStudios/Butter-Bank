@@ -99,6 +99,15 @@ class BFTChainTests(unittest.TestCase):
             chain = BFTChain(self.cfg, Path(directory) / "chain.json")
             self.assertFalse(chain.replace([chain.genesis_block(), {}])[0])
 
+    def test_bft_chain_rejects_inherited_uncoordinated_block_acceptance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            chain = BFTChain(self.cfg, Path(directory) / "chain.json")
+            block = chain.build_proposal(chain.validators[0]["public_key"])
+            ok, message = chain.accept_block(block)
+            self.assertFalse(ok)
+            self.assertIn("consensus finality", message)
+            self.assertEqual(len(chain.blocks), 1)
+
     def test_four_node_network_reaches_bft_finality(self):
         with tempfile.TemporaryDirectory() as directory:
             chains = []
