@@ -168,7 +168,7 @@ class BFTPrimitiveTests(unittest.TestCase):
             reopened.close()
 
 
-    def test_round_change_and_vote_signing_are_mutually_exclusive(self):
+    def test_round_change_after_vote_blocks_more_votes_in_old_round(self):
         with tempfile.TemporaryDirectory() as directory:
             signer = ConsensusSigner(
                 self.keys_and_records[0][0], self.chain_id, self.validators,
@@ -190,7 +190,7 @@ class BFTPrimitiveTests(unittest.TestCase):
                 signer.sign_vote(0, "prevote", self.block_hash)
             signer.close()
 
-    def test_locked_signer_cannot_sign_or_accept_round_change_certificate(self):
+    def test_locked_signer_advances_with_certificate_without_unlocking(self):
         with tempfile.TemporaryDirectory() as directory:
             signer = ConsensusSigner(
                 self.keys_and_records[0][0], self.chain_id, self.validators,
@@ -333,7 +333,7 @@ class BFTPrimitiveTests(unittest.TestCase):
             self.assertEqual(finalized["block"], block)
             self.assertEqual(signer.height, 2)
 
-    def test_engine_rejects_invalid_block_and_halts_locked_round_change(self):
+    def test_engine_requires_certificate_to_advance_round_and_rejects_invalid_block(self):
         with tempfile.TemporaryDirectory() as directory:
             signer = ConsensusSigner(
                 self.keys_and_records[0][0], self.chain_id, self.validators,
@@ -361,7 +361,7 @@ class BFTPrimitiveTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 engine.advance_round()
 
-    def test_locked_state_survives_restart_and_rejects_round_change_certificate(self):
+    def test_locked_state_survives_restart_and_round_change_preserves_lock(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "locked-state.json"
             key = self.keys_and_records[0][0]
