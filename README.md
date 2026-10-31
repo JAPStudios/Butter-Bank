@@ -44,13 +44,15 @@ No component in this repository should be represented as a licensed bank, deposi
 
 ## Milkchain BFT node
 
-Start from `milkchain/config.example.json`. The example deliberately contains issuer placeholders and no admission certificates; it is not runnable until the issuer federation and at least four validator certificates are configured.
+Copy `milkchain/config.example.json` to a private `config.bft.json` file, then configure the issuer public keys, admission certificates, validator key path, and peer addresses. The committed example deliberately contains issuer placeholders and no admission certificates, so it cannot start a validator as-is. Keep private keys and the completed configuration out of version control.
 
 ```sh
 python -m venv .venv
 . .venv/bin/activate
 pip install -r milkchain/requirements.txt
-PYTHONPATH=milkchain python milkchain/bft_node.py --config milkchain/config.example.json
+cp milkchain/config.example.json config.bft.json
+# Edit config.bft.json with the independently issued validator credentials.
+PYTHONPATH=milkchain python milkchain/bft_node.py --config config.bft.json
 ```
 
 The BFT node requires more than two-thirds of validator voting power to finalize a block. The current development configuration does not mint new Biscuits through block rewards. Monetary issuance rules are intentionally unspecified; no supply cap or issuance schedule is assumed. Read [the consensus and validator operations specification](milkchain/docs/BFT_CONSENSUS.md) before configuring validators.
