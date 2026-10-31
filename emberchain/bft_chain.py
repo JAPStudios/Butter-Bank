@@ -18,6 +18,10 @@ class BFTChain(Chain):
             raise ValueError("configuration must be a JSON object")
         if cfg.get("consensus") != "bft":
             raise ValueError("BFTChain requires consensus='bft'")
+        if cfg.get("block_reward") != 0:
+            raise ValueError(
+                "BFT block issuance is disabled until Biscuits supply and issuance rules are defined"
+            )
         chain_path = Path(path)
         if chain_path.is_symlink():
             raise ValueError("BFT chain data file must not be a symbolic link")
