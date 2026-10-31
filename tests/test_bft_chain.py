@@ -373,6 +373,7 @@ class BFTChainTests(unittest.TestCase):
                 request = urllib.request.Request(
                     url,
                     data=json.dumps({
+                        "block": block,
                         "valid_round": 1,
                         "valid_round_certificate": valid_round_certificate,
                     }).encode(),
