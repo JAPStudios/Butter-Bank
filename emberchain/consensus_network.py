@@ -76,6 +76,11 @@ class ConsensusHTTPServer:
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
+            def setup(self):
+                super().setup()
+                # Prevent slow clients from occupying every bounded worker.
+                self.connection.settimeout(10)
+
             def log_message(self, *_):
                 return
 
