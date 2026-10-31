@@ -1034,6 +1034,26 @@ class LockedRoundRecoveryTests(unittest.TestCase):
             self.assertFalse(engine.receive_proposal(invalid, {"hash": self.old_hash}))
             signer.close()
 
+    def test_restart_rejects_tampered_persisted_unlock_certificate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "signer.json"
+            key = self.keys_and_records[0][0]
+            signer = ConsensusSigner(key, self.chain_id, self.validators, path)
+            signer.lock_from_prevotes(self._prevote_certificate(0, self.old_hash),
+                                      0, self.old_hash)
+            signer.sign_round_change(2)
+            signer.advance_round(self._round_change_certificate(2))
+            signer.authorize_unlock(
+                1, 2, self.new_hash, self._prevote_certificate(1, self.new_hash)
+            )
+            signer.close()
+            state = json.loads(path.read_text())
+            state["unlock_authorization"]["certificate"][0]["signature"] = "00" * 64
+            path.write_text(json.dumps(state))
+            path.chmod(0o600)
+            with self.assertRaisesRegex(ValueError, "persisted unlock authorization"):
+                ConsensusSigner(key, self.chain_id, self.validators, path)
+
     def test_locked_signer_rejects_valid_round_not_newer_than_lock(self):
         with tempfile.TemporaryDirectory() as directory:
             signer = ConsensusSigner(
