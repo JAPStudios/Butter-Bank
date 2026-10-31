@@ -31,7 +31,7 @@ Python 3.10+:
 ```sh
 python -m venv .venv
 . .venv/bin/activate
-pip install -r requirements.txt
+pip install -r milkchain/requirements.txt
 PYTHONPATH=milkchain python -m unittest discover -s tests -v
 ```
 
@@ -49,7 +49,7 @@ Start from `milkchain/config.example.json`. The example deliberately contains is
 ```sh
 python -m venv .venv
 . .venv/bin/activate
-pip install -r requirements.txt
+pip install -r milkchain/requirements.txt
 PYTHONPATH=milkchain python milkchain/bft_node.py --config milkchain/config.example.json
 ```
 
