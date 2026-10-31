@@ -265,6 +265,8 @@ class ConsensusSigner:
                 )):
             raise ValueError("invalid or insufficient round-change certificate")
         self.state["round"] = target
+        # An authorization is bound to one exact target round and cannot be replayed.
+        self.state["unlock_authorization"] = None
         self._save()
         return target
 
