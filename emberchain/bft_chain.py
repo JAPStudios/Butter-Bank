@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 from node import Chain, bhash, canon, sha, MAX_TXS
-from consensus import verify_commit_certificate, validator_set_hash
+from consensus import verify_commit_certificate, verify_prevote_certificate, validator_set_hash
 from admission import validator_set_from_certificates
 
 
@@ -80,42 +80,70 @@ class BFTChain(Chain):
                 pass
             raise
 
+    def _verify_recovery_metadata(self, block, height, commit_round):
+        fields = {"valid_round", "valid_round_certificate"}
+        present = fields & set(block)
+        if not present:
+            return True
+        if present != fields:
+            return False
+        valid_round = block["valid_round"]
+        return (
+            isinstance(valid_round, int)
+            and not isinstance(valid_round, bool)
+            and 0 <= valid_round < commit_round
+            and verify_prevote_certificate(
+                block["valid_round_certificate"], self.validators, self.id,
+                height, valid_round, block["hash"],
+            )
+        )
+
     def valid_chain(self, blocks, require_certificates=True):
         try:
             if not isinstance(blocks, list) or not blocks:
                 return False
             cleaned = []
+            base_fields = {
+                "height", "previous_hash", "timestamp", "transactions", "nonce", "hash"
+            }
+            bft_fields = {"commit_round", "commit_certificate"}
+            recovery_fields = {"valid_round", "valid_round_certificate"}
             for index, block in enumerate(blocks):
                 if index == 0:
                     cleaned.append(block)
                     continue
                 if not isinstance(block, dict):
                     return False
-                base_fields = {"height", "previous_hash", "timestamp", "transactions", "nonce", "hash"}
-                bft_fields = {"commit_round", "commit_certificate"}
+                has_certificate = bft_fields <= set(block)
+                has_recovery = recovery_fields <= set(block)
+                if (set(block) - base_fields - bft_fields - recovery_fields
+                        or bool(recovery_fields & set(block)) != has_recovery
+                        or bool(bft_fields & set(block)) != has_certificate):
+                    return False
                 if require_certificates or index < len(blocks) - 1:
-                    if set(block) != base_fields | bft_fields:
+                    if not has_certificate or set(block) not in (
+                        base_fields | bft_fields,
+                        base_fields | bft_fields | recovery_fields,
+                    ):
                         return False
+                elif set(block) not in (
+                    base_fields,
+                    base_fields | bft_fields,
+                    base_fields | bft_fields | recovery_fields,
+                ):
+                    return False
+                if has_certificate:
                     round_number = block["commit_round"]
-                    if not isinstance(round_number, int) or isinstance(round_number, bool) or round_number < 0:
+                    if (not isinstance(round_number, int) or isinstance(round_number, bool)
+                            or round_number < 0):
                         return False
                     if not verify_commit_certificate(
                         block["commit_certificate"], self.validators, self.id,
                         index, round_number, block["hash"],
                     ):
                         return False
-                else:
-                    if set(block) not in (base_fields, base_fields | bft_fields):
+                    if not self._verify_recovery_metadata(block, index, round_number):
                         return False
-                    if bft_fields <= set(block):
-                        round_number = block["commit_round"]
-                        if not isinstance(round_number, int) or isinstance(round_number, bool) or round_number < 0:
-                            return False
-                        if not verify_commit_certificate(
-                            block["commit_certificate"], self.validators, self.id,
-                            index, round_number, block["hash"],
-                        ):
-                            return False
                 cleaned.append({key: block[key] for key in base_fields})
             old_diff = self.diff
             self.diff = 0
