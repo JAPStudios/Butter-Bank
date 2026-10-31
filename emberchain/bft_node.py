@@ -29,7 +29,9 @@ class BFTAPI(API):
         if urlparse(self.path).path != "/propose":
             return super().do_POST()
         try:
-            self.body()
+            request = self.body()
+            if set(request) - {"valid_round", "valid_round_certificate"}:
+                raise ValueError("proposal request accepts only valid_round and valid_round_certificate")
             chain = self.chain
             key = self.consensus_key
             signer = self.consensus_server.engine.signer
@@ -44,6 +46,8 @@ class BFTAPI(API):
             proposal = make_proposal(
                 key, chain.id, signer.height, self.consensus_server.engine.round,
                 block["hash"], self.consensus_server.engine.signer.validators_hash,
+                request.get("valid_round"),
+                request.get("valid_round_certificate", []),
             )
             self.consensus_server.publish_proposal(proposal, block)
             self.sendj(200, {"ok": True, "proposal": proposal, "block": block})
