@@ -12,7 +12,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from admission import issuer_set_hash, sign_admission
 from bft_chain import BFTChain
-from consensus import make_proposal, select_proposer
+from consensus import make_proposal, make_round_change, select_proposer
 from consensus_network import ConsensusHTTPServer
 from engine import ConsensusEngine
 from signer import ConsensusSigner
@@ -342,7 +342,7 @@ class BFTChainTests(unittest.TestCase):
             round_change_certificate = [
                 local_round_change,
                 *[
-                    __import__("consensus").make_round_change(
+                    make_round_change(
                         key, self.chain_id, 1, 2, chain.validators_hash
                     )
                     for key in self.validator_keys[1:3]
