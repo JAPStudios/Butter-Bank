@@ -146,6 +146,7 @@ class BFTChain(Chain):
                     # deterministic proposer for this height and commit round.
                     if (not isinstance(block["transactions"], list)
                             or not block["transactions"]
+                            or not isinstance(block["transactions"][0], dict)
                             or block["transactions"][0].get("recipient")
                             != select_proposer(self.validators, index, round_number)):
                         return False
