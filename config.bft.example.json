@@ -1,0 +1,25 @@
+{
+  "chain_id": "biscuits-bft-development",
+  "consensus": "bft",
+  "difficulty": 1,
+  "block_reward": 0,
+  "genesis_allocations": {},
+  "admission_epoch": 1,
+  "admission_issuers": [
+    "REPLACE_WITH_ISSUER_1_PUBLIC_KEY_HEX",
+    "REPLACE_WITH_ISSUER_2_PUBLIC_KEY_HEX",
+    "REPLACE_WITH_ISSUER_3_PUBLIC_KEY_HEX",
+    "REPLACE_WITH_ISSUER_4_PUBLIC_KEY_HEX"
+  ],
+  "admission_certificates": [],
+  "validator_private_key_file": "validator.key",
+  "validator_state_file": "data/validator-consensus-state.json",
+  "consensus_host": "127.0.0.1",
+  "consensus_port": 8334,
+  "consensus_peers": [],
+  "consensus_tls_certfile": null,
+  "consensus_tls_keyfile": null,
+  "host": "127.0.0.1",
+  "port": 8333,
+  "peers": []
+}
