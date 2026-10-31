@@ -251,6 +251,14 @@ class BFTChainTests(unittest.TestCase):
                 self.assertTrue(all(signer.height == 2 for signer in signers))
                 self.assertTrue(all(signer.locked_block_hash is None for signer in signers))
                 self.assertEqual(chains[0].blocks[-1]["valid_round"], 1)
+                tampered_chain = list(chains[0].blocks)
+                tampered_tip = dict(tampered_chain[-1])
+                tampered_tip["valid_round_certificate"] = [
+                    dict(vote) for vote in tampered_tip["valid_round_certificate"]
+                ]
+                tampered_tip["valid_round_certificate"][0]["signature"] = "00" * 64
+                tampered_chain[-1] = tampered_tip
+                self.assertFalse(chains[0].valid_chain(tampered_chain))
                 offline = ConsensusSigner(
                     self.validator_keys[0], self.chain_id, chains[0].validators,
                     Path(directory) / "offline-recovery-signer.json",
