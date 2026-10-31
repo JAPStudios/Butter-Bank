@@ -957,5 +957,97 @@ class ValidRoundProposalTests(unittest.TestCase):
         self.assertFalse(verify_proposal(tampered, self.validators, self.chain_id))
 
 
+
+class LockedRoundRecoveryTests(unittest.TestCase):
+    def setUp(self):
+        self.keys_and_records = [validator() for _ in range(4)]
+        self.validators = [record for _, record in self.keys_and_records]
+        self.chain_id = "biscuits-locked-recovery-test"
+        self.old_hash = "ab" * 32
+        self.new_hash = "cd" * 32
+        self.set_hash = validator_set_hash(self.validators)
+
+    def _round_change_certificate(self, target):
+        return [
+            make_round_change(key, self.chain_id, 1, target, self.set_hash)
+            for key, _ in self.keys_and_records[:3]
+        ]
+
+    def _prevote_certificate(self, round_number, block_hash):
+        return [
+            make_vote(key, self.chain_id, 1, round_number, "prevote",
+                      block_hash, self.set_hash)
+            for key, _ in self.keys_and_records[:3]
+        ]
+
+    def test_valid_round_unlock_authorization_survives_restart_and_updates_lock_only_after_quorum(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "signer.json"
+            key = self.keys_and_records[0][0]
+            signer = ConsensusSigner(key, self.chain_id, self.validators, path)
+            signer.lock_from_prevotes(self._prevote_certificate(0, self.old_hash),
+                                      0, self.old_hash)
+            signer.sign_round_change(2)
+            signer.advance_round(self._round_change_certificate(2))
+            certificate = self._prevote_certificate(1, self.new_hash)
+            signer.authorize_unlock(1, 2, self.new_hash, certificate)
+            signer.close()
+
+            reopened = ConsensusSigner(key, self.chain_id, self.validators, path)
+            self.assertEqual(reopened.locked_block_hash, self.old_hash)
+            self.assertEqual(reopened.sign_vote(2, "prevote", self.new_hash)["block_hash"],
+                             self.new_hash)
+            self.assertEqual(reopened.locked_block_hash, self.old_hash)
+            with self.assertRaises(ValueError):
+                reopened.sign_vote(2, "precommit", self.new_hash)
+            reopened.lock_from_prevotes(self._prevote_certificate(2, self.new_hash),
+                                        2, self.new_hash)
+            self.assertEqual(reopened.locked_block_hash, self.new_hash)
+            self.assertEqual(reopened.locked_round, 2)
+            reopened.close()
+
+    def test_locked_engine_accepts_only_newer_valid_round_proposal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            key = self.keys_and_records[0][0]
+            signer = ConsensusSigner(key, self.chain_id, self.validators,
+                                     Path(directory) / "signer.json")
+            signer.lock_from_prevotes(self._prevote_certificate(0, self.old_hash),
+                                      0, self.old_hash)
+            signer.sign_round_change(2)
+            signer.advance_round(self._round_change_certificate(2))
+            proposer = select_proposer(self.validators, 1, 2)
+            proposer_key = next(k for k, record in self.keys_and_records
+                                if record["public_key"] == proposer)
+            certificate = self._prevote_certificate(1, self.new_hash)
+            proposal = make_proposal(
+                proposer_key, self.chain_id, 1, 2, self.new_hash, self.set_hash,
+                1, certificate,
+            )
+            engine = ConsensusEngine(signer, lambda block: block.get("hash"))
+            self.assertTrue(engine.receive_proposal(proposal, {"hash": self.new_hash}))
+            self.assertEqual(engine.prevote(self.new_hash)["block_hash"], self.new_hash)
+            invalid = make_proposal(
+                proposer_key, self.chain_id, 1, 2, self.old_hash, self.set_hash
+            )
+            self.assertFalse(engine.receive_proposal(invalid, {"hash": self.old_hash}))
+            signer.close()
+
+    def test_locked_signer_rejects_valid_round_not_newer_than_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            signer = ConsensusSigner(
+                self.keys_and_records[0][0], self.chain_id, self.validators,
+                Path(directory) / "signer.json"
+            )
+            signer.lock_from_prevotes(self._prevote_certificate(1, self.old_hash),
+                                      1, self.old_hash)
+            signer.sign_round_change(3)
+            signer.advance_round(self._round_change_certificate(3))
+            with self.assertRaisesRegex(ValueError, "newer than the lock"):
+                signer.authorize_unlock(
+                    1, 3, self.new_hash, self._prevote_certificate(1, self.new_hash)
+                )
+            signer.close()
+
+
 if __name__ == "__main__":
     unittest.main()
