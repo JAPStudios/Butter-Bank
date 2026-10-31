@@ -39,7 +39,9 @@ def synchronize_peer(chain, peer):
     """Fetch and validate a peer's chain; adopt it only if it has more work."""
     try:
         status=get(peer+'/status')
-        expected={'chain_id':chain.id,'genesis_hash':chain.blocks[0]['hash'],'difficulty':chain.diff,'block_reward':chain.reward}
+        expected={'chain_id':chain.id,'genesis_hash':chain.blocks[0]['hash'],'difficulty':chain.diff,'block_reward':chain.reward,'consensus':getattr(chain,'consensus_mode','pow')}
+        if getattr(chain,'validators_hash',None):
+            expected['validator_set_hash']=chain.validators_hash
         if any(status.get(k)!=v for k,v in expected.items()):
             return False
         candidate=get(peer+'/chain').get('chain')
@@ -226,7 +228,10 @@ class API(BaseHTTPRequestHandler):
         p=urlparse(self.path).path
         if p=='/status':
             with self.chain.lock:
-                self.sendj(200,{'chain_id':self.chain.id,'genesis_hash':self.chain.blocks[0]['hash'],'height':len(self.chain.blocks)-1,'tip':self.chain.blocks[-1]['hash'],'difficulty':self.chain.diff,'block_reward':self.chain.reward,'mempool_size':len(self.chain.pool),'symbol':self.chain.cfg.get('symbol','COIN')})
+                status={'chain_id':self.chain.id,'genesis_hash':self.chain.blocks[0]['hash'],'height':len(self.chain.blocks)-1,'tip':self.chain.blocks[-1]['hash'],'difficulty':self.chain.diff,'block_reward':self.chain.reward,'mempool_size':len(self.chain.pool),'symbol':self.chain.cfg.get('symbol','COIN'),'consensus':getattr(self.chain,'consensus_mode','pow')}
+                if getattr(self.chain,'validators_hash',None):
+                    status['validator_set_hash']=self.chain.validators_hash
+                self.sendj(200,status)
         elif p=='/chain':
             with self.chain.lock: self.sendj(200,{'chain':list(self.chain.blocks)})
         elif p=='/balances':
@@ -268,9 +273,15 @@ class API(BaseHTTPRequestHandler):
                     self.sendj(400,{'error':'peer must be a base HTTP(S) URL without credentials, path, query, or fragment'});return
                 try: parsed.port
                 except ValueError: self.sendj(400,{'error':'peer URL has an invalid port'});return
+                if (getattr(self.chain,'consensus_mode','pow')=='bft'
+                        and parsed.scheme!='https'
+                        and parsed.hostname not in ('127.0.0.1','localhost','::1')):
+                    self.sendj(400,{'error':'remote BFT chain peers must use HTTPS'});return
                 peer=raw_peer.rstrip('/')
                 status=get(peer+'/status')
-                expected={'chain_id':self.chain.id,'genesis_hash':self.chain.blocks[0]['hash'],'difficulty':self.chain.diff,'block_reward':self.chain.reward}
+                expected={'chain_id':self.chain.id,'genesis_hash':self.chain.blocks[0]['hash'],'difficulty':self.chain.diff,'block_reward':self.chain.reward,'consensus':getattr(self.chain,'consensus_mode','pow')}
+                if getattr(self.chain,'validators_hash',None):
+                    expected['validator_set_hash']=self.chain.validators_hash
                 if any(status.get(k)!=v for k,v in expected.items()):
                     self.sendj(400,{'error':'peer is on a different network configuration'});return
                 remote_chain=get(peer+'/chain').get('chain')
@@ -294,7 +305,7 @@ def main():
     API.chain=c;API.peers=c.peers
     threading.Thread(target=peer_sync_loop,args=(c,),daemon=True).start()
     srv=ThreadingHTTPServer((cfg.get('host','127.0.0.1'),int(cfg.get('port',8333))),API)
-    print(f"Emberchain node on {cfg.get('host')}:{cfg.get('port')} | chain={c.id} | height={len(c.blocks)-1}")
+    print(f"Milkchain node on {cfg.get('host')}:{cfg.get('port')} | chain={c.id} | height={len(c.blocks)-1}")
     try:srv.serve_forever()
     except KeyboardInterrupt:pass
     finally:srv.server_close()
