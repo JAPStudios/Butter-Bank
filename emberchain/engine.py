@@ -107,7 +107,7 @@ class ConsensusEngine:
         slot = (vote["round"], vote["step"])
         prior = self.votes[slot].get(vote["validator"])
         if prior is not None:
-            return None
+            return self.retry_pending_finalization() if vote["step"] == "precommit" else None
         self.votes[slot][vote["validator"]] = vote
         matching = [
             item for item in self.votes[slot].values()
@@ -166,7 +166,7 @@ class ConsensusEngine:
                     continue
             try:
                 self.signer.finalize(matching, self.round, block_hash)
-            except ValueError:
+            except (ValueError, OSError):
                 continue
             self.finalized[result["height"]] = result
             self.round = 0
