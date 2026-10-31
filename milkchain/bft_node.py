@@ -90,10 +90,15 @@ def load_validator_key(path):
 
 def bft_peer_sync_loop(chain, engine, interval=10, stop_event=None):
     """Keep peer synchronization alive across transient peer and storage failures."""
-    if (not isinstance(interval, (int, float)) or isinstance(interval, bool)
-            or not math.isfinite(float(interval)) or interval <= 0):
+    if not isinstance(interval, (int, float)) or isinstance(interval, bool):
         raise ValueError("peer sync interval must be a finite positive number")
-    stop_event = stop_event or threading.Event()
+    try:
+        interval = float(interval)
+    except (OverflowError, ValueError):
+        raise ValueError("peer sync interval must be a finite positive number")
+    if not math.isfinite(interval) or interval <= 0:
+        raise ValueError("peer sync interval must be a finite positive number")
+    stop_event = stop_event if stop_event is not None else threading.Event()
     while not stop_event.is_set():
         # A single unavailable or malformed peer must not permanently kill
         # synchronization with every other peer.
@@ -118,7 +123,7 @@ def bft_peer_sync_loop(chain, engine, interval=10, stop_event=None):
             # Finalization is retried on the next cycle after transient I/O
             # or chain-persistence failures.
             pass
-        if stop_event.wait(float(interval)):
+        if stop_event.wait(interval):
             break
 
 
@@ -226,7 +231,12 @@ def main():
         ),
         daemon=True,
     ).start()
-    threading.Thread(target=bft_peer_sync_loop, args=(chain, engine), daemon=True).start()
+    peer_sync_stop = threading.Event()
+    threading.Thread(
+        target=bft_peer_sync_loop,
+        args=(chain, engine, 10, peer_sync_stop),
+        daemon=True,
+    ).start()
     http_server = ThreadingHTTPServer(
         (api_host, int(cfg.get("port", 8333))), BFTAPI
     )
@@ -240,6 +250,7 @@ def main():
     finally:
         http_server.server_close()
         timeout_stop.set()
+        peer_sync_stop.set()
         consensus_server.shutdown()
         signer.close()
 
