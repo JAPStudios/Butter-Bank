@@ -651,6 +651,56 @@ class BFTPrimitiveTests(unittest.TestCase):
             self.assertEqual(sum(len(votes) for votes in engine.votes.values()), 0)
 
 
+
+class PersistedSignerSlotValidationTests(unittest.TestCase):
+    def setUp(self):
+        self.keys_and_records = [validator() for _ in range(4)]
+        self.validators = [record for _, record in self.keys_and_records]
+        self.chain_id = "biscuits-persisted-state-test"
+
+    def _rewrite_state(self, path, mutate):
+        key = self.keys_and_records[0][0]
+        signer = ConsensusSigner(key, self.chain_id, self.validators, path)
+        signer.sign_vote(0, "prevote", "ab" * 32)
+        signer.close()
+        state = json.loads(path.read_text())
+        mutate(state)
+        path.write_text(json.dumps(state))
+        path.chmod(0o600)
+        return key
+
+    def test_rejects_noncanonical_signed_vote_slot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "signer.json"
+            key = self._rewrite_state(path, lambda state: state["signed"].update({
+                "01:0:prevote": state["signed"].pop("1:0:prevote")
+            }))
+            with self.assertRaisesRegex(ValueError, "persisted signing record"):
+                ConsensusSigner(key, self.chain_id, self.validators, path)
+
+    def test_rejects_signed_vote_from_future_height(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "signer.json"
+            key = self._rewrite_state(path, lambda state: state["signed"].update({
+                "2:0:prevote": dict(state["signed"].pop("1:0:prevote"))
+            }))
+            with self.assertRaisesRegex(ValueError, "persisted signing record"):
+                ConsensusSigner(key, self.chain_id, self.validators, path)
+
+    def test_rejects_noncanonical_round_change_slot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "signer.json"
+            key = self.keys_and_records[0][0]
+            signer = ConsensusSigner(key, self.chain_id, self.validators, path)
+            signer.sign_round_change(1)
+            signer.close()
+            state = json.loads(path.read_text())
+            state["signed_round_changes"]["01"] = state["signed_round_changes"].pop("1")
+            path.write_text(json.dumps(state))
+            path.chmod(0o600)
+            with self.assertRaisesRegex(ValueError, "persisted round-change"):
+                ConsensusSigner(key, self.chain_id, self.validators, path)
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -765,53 +815,3 @@ class BFTRoundBoundsTests(unittest.TestCase):
                     self.keys_and_records[0][0], self.chain_id,
                     self.validators, path
                 )
-
-
-class PersistedSignerSlotValidationTests(unittest.TestCase):
-    def setUp(self):
-        self.keys_and_records = [validator() for _ in range(4)]
-        self.validators = [record for _, record in self.keys_and_records]
-        self.chain_id = "biscuits-persisted-state-test"
-
-    def _rewrite_state(self, path, mutate):
-        key = self.keys_and_records[0][0]
-        signer = ConsensusSigner(key, self.chain_id, self.validators, path)
-        signer.sign_vote(0, "prevote", "ab" * 32)
-        signer.close()
-        state = json.loads(path.read_text())
-        mutate(state)
-        path.write_text(json.dumps(state))
-        path.chmod(0o600)
-        return key
-
-    def test_rejects_noncanonical_signed_vote_slot(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "signer.json"
-            key = self._rewrite_state(path, lambda state: state["signed"].update({
-                "01:0:prevote": state["signed"].pop("1:0:prevote")
-            }))
-            with self.assertRaisesRegex(ValueError, "persisted signing record"):
-                ConsensusSigner(key, self.chain_id, self.validators, path)
-
-    def test_rejects_signed_vote_from_future_height(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "signer.json"
-            key = self._rewrite_state(path, lambda state: state["signed"].update({
-                "2:0:prevote": dict(state["signed"].pop("1:0:prevote"))
-            }))
-            with self.assertRaisesRegex(ValueError, "persisted signing record"):
-                ConsensusSigner(key, self.chain_id, self.validators, path)
-
-    def test_rejects_noncanonical_round_change_slot(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "signer.json"
-            key = self.keys_and_records[0][0]
-            signer = ConsensusSigner(key, self.chain_id, self.validators, path)
-            signer.sign_round_change(1)
-            signer.close()
-            state = json.loads(path.read_text())
-            state["signed_round_changes"]["01"] = state["signed_round_changes"].pop("1")
-            path.write_text(json.dumps(state))
-            path.chmod(0o600)
-            with self.assertRaisesRegex(ValueError, "persisted round-change"):
-                ConsensusSigner(key, self.chain_id, self.validators, path)
