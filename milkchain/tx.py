@@ -4,10 +4,33 @@ import argparse,json,urllib.request,urllib.error
 from pathlib import Path
 from wallet import read_wallet
 
+MAX_NODE_RESPONSE_BYTES = 4 * 1024 * 1024
+
+
+def read_limited_response(response, max_bytes=MAX_NODE_RESPONSE_BYTES):
+    if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or max_bytes < 1:
+        raise ValueError('response size limit must be a positive integer')
+    headers = response.headers
+    lengths = headers.get_all('Content-Length', [])
+    if len(lengths) > 1:
+        raise ValueError('duplicate response Content-Length')
+    if lengths:
+        raw_length = lengths[0]
+        if not raw_length.isascii() or not raw_length.isdecimal():
+            raise ValueError('invalid response Content-Length')
+        if int(raw_length) > max_bytes:
+            raise ValueError('node response exceeds size limit')
+    raw = response.read(max_bytes + 1)
+    if len(raw) > max_bytes:
+        raise ValueError('node response exceeds size limit')
+    if lengths and len(raw) != int(lengths[0]):
+        raise ValueError('incomplete node response')
+    return raw
+
 def canon(x): return json.dumps(x,sort_keys=True,separators=(',',':')).encode()
 def get_json(url):
     req=urllib.request.Request(url,headers={'Accept':'application/json'})
-    with urllib.request.urlopen(req,timeout=5) as r: return json.loads(r.read())
+    with urllib.request.urlopen(req,timeout=5) as r: return json.loads(read_limited_response(r))
 def main():
     p=argparse.ArgumentParser()
     p.add_argument('--wallet',required=True)
@@ -49,9 +72,9 @@ def main():
     tx['signature']=key.sign(canon(tx)).hex()
     req=urllib.request.Request(node+'/tx',data=canon(tx),headers={'Content-Type':'application/json','Accept':'application/json'},method='POST')
     try:
-        with urllib.request.urlopen(req,timeout=5) as r: print(r.read().decode())
+        with urllib.request.urlopen(req,timeout=5) as r: print(read_limited_response(r).decode())
     except urllib.error.HTTPError as e:
-        print(e.read().decode())
+        print(read_limited_response(e).decode())
         raise SystemExit(1)
     except OSError as e:
         p.error(f'cannot submit transaction: {e}')
