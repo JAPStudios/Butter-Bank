@@ -44,7 +44,7 @@ class BFTAPI(API):
                 return
             block = request.get("block")
             if block is None:
-                block = chain.build_proposal(proposer)
+                block = chain.build_proposal(proposer, self.consensus_server.engine.round)
             elif not isinstance(block, dict) or chain.validate_proposal_block(block) is None:
                 raise ValueError("supplied proposal block is invalid for the current finalized chain")
             proposal = make_proposal(
