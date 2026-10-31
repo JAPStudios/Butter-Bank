@@ -1,6 +1,6 @@
 {
   "chain_id": "milkchain-biscuits-devnet-1",
-  "symbol": "BISCUITS",
+  "symbol": "Biscuits",
   "decimals": 8,
   "consensus": "bft",
   "difficulty": 1,
