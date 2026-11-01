@@ -417,3 +417,41 @@ class MempoolBoundTests(unittest.TestCase):
         with patch("node.MAX_MEMPOOL_TXS", 1):
             with self.assertRaisesRegex(ValueError, "mempool limit"):
                 Chain(self.cfg, self.path)
+
+class RevalidationMempoolBoundTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.key, _, self.sender = wallet()
+        _, _, self.recipient = wallet()
+        self.cfg = {
+            "chain_id": "revalidation-mempool-bound-test",
+            "difficulty": 1,
+            "block_reward": 0,
+            "genesis_allocations": {self.sender: 2000},
+        }
+        self.chain = Chain(self.cfg, Path(self.temp.name) / "chain.json")
+
+    def test_revalidation_never_rebuilds_pool_over_limit(self):
+        transactions = []
+        for nonce in range(1, 902):
+            tx = {
+                "chain_id": self.cfg["chain_id"],
+                "sender": self.sender,
+                "recipient": self.recipient,
+                "amount": 1,
+                "fee": 0,
+                "nonce": nonce,
+            }
+            tx["signature"] = self.key.sign(signing_bytes(tx)).hex()
+            transactions.append(tx)
+
+        self.chain.pool = transactions
+        self.chain._revalidate_pool()
+
+        self.assertEqual(len(self.chain.pool), 900)
+        self.assertEqual(
+            [tx["nonce"] for tx in self.chain.pool],
+            list(range(1, 901)),
+        )
+
