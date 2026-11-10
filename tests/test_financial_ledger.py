@@ -16,6 +16,12 @@ class FinancialLedgerTests(unittest.TestCase):
         self.usd_b = self.ledger.create_account("customer-b", "USD")
         self.jpy_a = self.ledger.create_account("customer-a", "JPY")
         self.jpy_b = self.ledger.create_account("customer-b", "JPY")
+        self.usd_clearing = self.ledger.create_account(
+            "ledger-clearing", "USD", "clearing", allow_negative=True
+        )
+        self.jpy_clearing = self.ledger.create_account(
+            "ledger-clearing", "JPY", "clearing", allow_negative=True
+        )
 
     def tearDown(self):
         self.ledger.close()
@@ -25,10 +31,10 @@ class FinancialLedgerTests(unittest.TestCase):
         self.assertEqual(self.ledger.currency("USD")["minor_unit_exponent"], 2)
         self.assertEqual(self.ledger.currency("JPY")["minor_unit_exponent"], 0)
         self.ledger.post("usd-opening", "USD opening entry", [
-            (self.usd_a, 1250), (self.usd_b, -1250),
+            (self.usd_a, 1250), (self.usd_clearing, -1250),
         ])
         self.ledger.post("jpy-opening", "JPY opening entry", [
-            (self.jpy_a, 5000), (self.jpy_b, -5000),
+            (self.jpy_a, 5000), (self.jpy_clearing, -5000),
         ])
         self.assertEqual(self.ledger.balance_minor(self.usd_a), 1250)
         self.assertEqual(self.ledger.balance_minor(self.jpy_a), 5000)
@@ -55,19 +61,26 @@ class FinancialLedgerTests(unittest.TestCase):
         self.assertEqual(self.ledger.balance_minor(self.usd_b), 0)
 
     def test_idempotency_returns_original_transaction(self):
-        entries = [(self.usd_a, 900), (self.usd_b, -900)]
+        self.ledger.post("opening", "Opening balance", [
+            (self.usd_a, 900), (self.usd_clearing, -900),
+        ])
+        entries = [(self.usd_a, -900), (self.usd_b, 900)]
         first = self.ledger.post("same-request", "Transfer", entries)
         second = self.ledger.post("same-request", "Transfer", entries)
         self.assertEqual(first, second)
-        self.assertEqual(self.ledger.balance_minor(self.usd_a), 900)
+        self.assertEqual(self.ledger.balance_minor(self.usd_a), 0)
+        self.assertEqual(self.ledger.balance_minor(self.usd_b), 900)
 
     def test_reused_idempotency_key_with_different_content_is_rejected(self):
+        self.ledger.post("opening", "Opening balance", [
+            (self.usd_a, 900), (self.usd_clearing, -900),
+        ])
         self.ledger.post("same-request", "Transfer", [
-            (self.usd_a, 900), (self.usd_b, -900),
+            (self.usd_a, -900), (self.usd_b, 900),
         ])
         with self.assertRaises(IdempotencyConflict):
             self.ledger.post("same-request", "Different transfer", [
-                (self.usd_a, 800), (self.usd_b, -800),
+                (self.usd_a, -800), (self.usd_b, 800),
             ])
 
     def test_currency_metadata_cannot_be_silently_changed(self):
@@ -76,7 +89,7 @@ class FinancialLedgerTests(unittest.TestCase):
 
     def test_database_persists_accounts_and_journal(self):
         self.ledger.post("persistent", "Persistent entry", [
-            (self.usd_a, 250), (self.usd_b, -250),
+            (self.usd_a, 250), (self.usd_clearing, -250),
         ])
         self.ledger.close()
         self.ledger = FinancialLedger(self.path)
