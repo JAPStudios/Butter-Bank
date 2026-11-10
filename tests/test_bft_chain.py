@@ -978,5 +978,108 @@ class BFTChainTests(unittest.TestCase):
                 BFTChain(self.cfg, link)
 
 
+    def test_multiple_committed_transitions_rotate_quorum_at_each_activation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "multi-epoch-chain.json"
+            chain = BFTChain(self.cfg, path)
+            set_two_keys = [Ed25519PrivateKey.generate() for _ in range(4)]
+            set_two = [
+                {"public_key": key.public_key().public_bytes_raw().hex(),
+                 "voting_power": 1}
+                for key in set_two_keys
+            ]
+            first_transition = make_transition_certificate(
+                self.validator_keys[:3], self.chain_id, 2,
+                chain.initial_validators, set_two,
+            )
+            first_proposer = select_proposer(chain.validators, 1, 0)
+            first_block = chain.build_proposal(
+                first_proposer, validator_transition=first_transition
+            )
+            old_keys = {
+                key.public_key().public_bytes_raw().hex(): key
+                for key in self.validator_keys
+            }
+            first_votes = [
+                make_vote(old_keys[item["public_key"]], self.chain_id, 1, 0,
+                          "precommit", first_block["hash"],
+                          validator_set_hash(chain.initial_validators))
+                for item in chain.initial_validators[:3]
+            ]
+            accepted, message = chain.accept_finalized_block(
+                first_block, 0, first_votes
+            )
+            self.assertTrue(accepted, message)
+            self.assertEqual(
+                chain.validators, sorted(set_two, key=lambda item: item["public_key"])
+            )
+
+            set_three_keys = [Ed25519PrivateKey.generate() for _ in range(4)]
+            set_three = [
+                {"public_key": key.public_key().public_bytes_raw().hex(),
+                 "voting_power": 1}
+                for key in set_three_keys
+            ]
+            second_transition = make_transition_certificate(
+                set_two_keys[:3], self.chain_id, 3, set_two, set_three
+            )
+            second_proposer = select_proposer(chain.validators, 2, 0)
+            second_block = chain.build_proposal(
+                second_proposer, validator_transition=second_transition
+            )
+            # A certificate from the retired set cannot finalize the next height.
+            stale_votes = [
+                make_vote(key, self.chain_id, 2, 0, "precommit",
+                          second_block["hash"], validator_set_hash(chain.initial_validators))
+                for key in self.validator_keys[:3]
+            ]
+            accepted, _ = chain.accept_finalized_block(second_block, 0, stale_votes)
+            self.assertFalse(accepted)
+
+            set_two_by_public = {
+                key.public_key().public_bytes_raw().hex(): key
+                for key in set_two_keys
+            }
+            second_votes = [
+                make_vote(set_two_by_public[item["public_key"]], self.chain_id,
+                          2, 0, "precommit", second_block["hash"],
+                          validator_set_hash(set_two))
+                for item in chain.validators[:3]
+            ]
+            accepted, message = chain.accept_finalized_block(
+                second_block, 0, second_votes
+            )
+            self.assertTrue(accepted, message)
+            self.assertEqual(
+                chain.validators,
+                sorted(set_three, key=lambda item: item["public_key"]),
+            )
+
+            third_proposer = select_proposer(chain.validators, 3, 0)
+            third_block = chain.build_proposal(third_proposer)
+            set_three_by_public = {
+                key.public_key().public_bytes_raw().hex(): key
+                for key in set_three_keys
+            }
+            third_votes = [
+                make_vote(set_three_by_public[item["public_key"]], self.chain_id,
+                          3, 0, "precommit", third_block["hash"],
+                          validator_set_hash(set_three))
+                for item in chain.validators[:3]
+            ]
+            accepted, message = chain.accept_finalized_block(
+                third_block, 0, third_votes
+            )
+            self.assertTrue(accepted, message)
+
+            reopened = BFTChain(self.cfg, path)
+            self.assertEqual(reopened.blocks, chain.blocks)
+            self.assertEqual(
+                reopened.validators,
+                sorted(set_three, key=lambda item: item["public_key"]),
+            )
+            self.assertTrue(reopened.valid_chain(reopened.blocks))
+
+
 if __name__ == "__main__":
     unittest.main()
