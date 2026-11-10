@@ -1280,10 +1280,10 @@ class LiveValidatorRotationTests(unittest.TestCase):
                 old_signer, lambda block: block.get("hash"),
                 on_finalized=lambda result: {
                     "validators": self.new_set,
-                    "signer": new_signer,
                     "activation_height": 2,
                     "chain_height": 2,
                 },
+                on_validator_set=lambda: new_signer,
             )
             finalized = self._proposal_and_precommits(engine, self.old)
             self.assertIsNotNone(finalized)
