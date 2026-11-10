@@ -179,14 +179,11 @@ def write_new_wallet(path, key, passphrase):
     return public_hex(key)
 
 
-def encrypt_legacy_wallet(path, passphrase):
-    target = Path(path)
-    if target.is_symlink() or not target.is_file():
-        raise ValueError("wallet file must be a regular non-symlink file")
-    metadata = target.stat()
-    key, public = read_wallet(target, passphrase)
+def _replace_wallet_file(target, key, passphrase, original_metadata):
     payload = json.dumps(_wallet_payload(key, passphrase), sort_keys=True, indent=2) + "\n"
-    descriptor, temporary = tempfile.mkstemp(prefix=target.name + ".", suffix=".tmp", dir=target.parent)
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=target.name + ".", suffix=".tmp", dir=target.parent
+    )
     try:
         if hasattr(os, "fchmod"):
             os.fchmod(descriptor, 0o600)
@@ -195,7 +192,9 @@ def encrypt_legacy_wallet(path, passphrase):
             output.flush()
             os.fsync(output.fileno())
         current = target.stat()
-        if (current.st_dev, current.st_ino) != (metadata.st_dev, metadata.st_ino):
+        if (current.st_dev, current.st_ino) != (
+            original_metadata.st_dev, original_metadata.st_ino
+        ):
             raise RuntimeError("wallet file changed during encryption; refusing to replace it")
         os.replace(temporary, target)
         try:
@@ -212,6 +211,26 @@ def encrypt_legacy_wallet(path, passphrase):
         except OSError:
             pass
         raise
+
+
+def encrypt_legacy_wallet(path, passphrase):
+    target = Path(path)
+    if target.is_symlink() or not target.is_file():
+        raise ValueError("wallet file must be a regular non-symlink file")
+    metadata = target.stat()
+    key, public = read_wallet(target, passphrase)
+    _replace_wallet_file(target, key, passphrase, metadata)
+    return public
+
+
+def change_wallet_passphrase(path, old_passphrase, new_passphrase):
+    """Rotate the encryption passphrase without changing the wallet keypair."""
+    target = Path(path)
+    if target.is_symlink() or not target.is_file():
+        raise ValueError("wallet file must be a regular non-symlink file")
+    metadata = target.stat()
+    key, public = read_wallet(target, old_passphrase)
+    _replace_wallet_file(target, key, new_passphrase, metadata)
     return public
 
 
@@ -224,6 +243,8 @@ def main():
     address.add_argument("file")
     encrypt = sub.add_parser("encrypt")
     encrypt.add_argument("file")
+    change = sub.add_parser("change-passphrase")
+    change.add_argument("file")
     args = parser.parse_args()
 
     if args.cmd == "create":
@@ -236,10 +257,15 @@ def main():
     elif args.cmd == "address":
         _, public = read_wallet(args.file)
         print(public)
-    else:
+    elif args.cmd == "encrypt":
         passphrase = _prompt_new_passphrase()
         public = encrypt_legacy_wallet(args.file, passphrase)
         print("Encrypted wallet:", public)
+    else:
+        old_passphrase = _prompt_passphrase()
+        new_passphrase = _prompt_new_passphrase()
+        public = change_wallet_passphrase(args.file, old_passphrase, new_passphrase)
+        print("Wallet passphrase changed:", public)
 
 
 if __name__ == "__main__":
