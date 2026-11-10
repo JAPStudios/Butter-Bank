@@ -31,8 +31,8 @@ def public_hex(key):
 
 
 def _derive_key(passphrase, salt):
-    if not isinstance(passphrase, str) or not passphrase:
-        raise ValueError("wallet passphrase must not be empty")
+    if not isinstance(passphrase, str) or len(passphrase) < 12:
+        raise ValueError("wallet passphrase must contain at least 12 characters")
     return Scrypt(
         salt=salt, length=32, n=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P
     ).derive(passphrase.encode("utf-8"))
