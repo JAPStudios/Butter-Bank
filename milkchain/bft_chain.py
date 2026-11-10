@@ -305,8 +305,8 @@ class BFTChain(Chain):
             self.pool = [tx for tx in self.pool if sha(canon(tx)) not in included]
             try:
                 self._revalidate_pool()
-                self.save()
                 self._refresh_active_validator_set()
+                self.save()
             except Exception:
                 self.blocks = previous_blocks
                 self.pool = previous_pool
