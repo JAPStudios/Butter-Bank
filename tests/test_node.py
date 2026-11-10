@@ -12,7 +12,7 @@ from pathlib import Path
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives import serialization
 
-from node import API, Chain, bhash, canon, signing_bytes, synchronize_peer, get
+from node import API, Chain, bhash, canon, signing_bytes, synchronize_peer, get, post
 
 
 def wallet():
