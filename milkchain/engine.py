@@ -196,7 +196,7 @@ class ConsensusEngine:
         for item in self.votes.get(slot, {}).values():
             by_hash[item["block_hash"]].append(item)
         for block_hash, matching in by_hash.items():
-            power = sum(self.signer.validators[item["validator"]] for item in matching)
+            power = sum(self.validator_power[item["validator"]] for item in matching)
             if power * 3 <= self.total_power * 2:
                 continue
             block = self.proposals.get(block_hash)
