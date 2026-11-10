@@ -159,7 +159,8 @@ def bft_peer_sync_loop(chain, engine, interval=10, stop_event=None, on_validator
                 LOGGER.warning("BFT peer synchronization failed for %s", peer, exc_info=True)
                 continue
         try:
-            if (engine.validator_set_hash != chain.validators_hash
+            if (not engine.active
+                    or engine.validator_set_hash != chain.validators_hash
                     or engine.validator_activation_height != chain.validator_activation_height):
                 activation = (
                     on_validator_set() if on_validator_set is not None else {
