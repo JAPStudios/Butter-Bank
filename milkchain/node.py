@@ -170,7 +170,8 @@ def synchronize_peer(chain, peer):
     try:
         status=get(peer+'/status')
         expected={'chain_id':chain.id,'genesis_hash':chain.blocks[0]['hash'],'difficulty':chain.diff,'block_reward':chain.reward,'consensus':getattr(chain,'consensus_mode','pow')}
-        if getattr(chain,'validators_hash',None):
+        if (getattr(chain,'validators_hash',None)
+                and getattr(chain,'consensus_mode','pow') != 'bft'):
             expected['validator_set_hash']=chain.validators_hash
         if any(status.get(k)!=v for k,v in expected.items()):
             return False
