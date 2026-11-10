@@ -1234,5 +1234,102 @@ class ConsensusHTTPBodyParsingTests(unittest.TestCase):
             read_json_message(self._headers("2"), io.BytesIO(b"[]"))
 
 
+class LiveValidatorRotationTests(unittest.TestCase):
+    def setUp(self):
+        self.chain_id = "biscuits-live-rotation-test"
+        self.old = [validator() for _ in range(4)]
+        self.new = [validator() for _ in range(4)]
+        self.old_set = [record for _, record in self.old]
+        self.new_set = [record for _, record in self.new]
+        self.block_hash = "ab" * 32
+
+    def _proposal_and_precommits(self, engine, keys_and_records):
+        proposer = select_proposer(engine.validators, engine.height, engine.round)
+        proposer_key = next(
+            key for key, record in keys_and_records
+            if record["public_key"] == proposer
+        )
+        proposal = make_proposal(
+            proposer_key, self.chain_id, engine.height, engine.round,
+            self.block_hash, engine.validator_set_hash,
+        )
+        block = {"hash": self.block_hash}
+        self.assertTrue(engine.receive_proposal(proposal, block))
+        result = None
+        for key, record in keys_and_records[:3]:
+            vote = make_vote(
+                key, self.chain_id, engine.height, engine.round, "precommit",
+                self.block_hash, engine.validator_set_hash,
+            )
+            action = engine.receive_vote(vote)
+            if action is not None:
+                result = action
+        return result
+
+    def test_finalization_rotates_signer_after_old_set_commits_transition_block(self):
+        with tempfile.TemporaryDirectory() as directory:
+            old_signer = ConsensusSigner(
+                self.old[0][0], self.chain_id, self.old_set,
+                Path(directory) / "old-state.json",
+            )
+            new_signer = ConsensusSigner(
+                self.new[0][0], self.chain_id, self.new_set,
+                Path(directory) / "new-state.json", initial_height=2,
+            )
+            engine = ConsensusEngine(
+                old_signer, lambda block: block.get("hash"),
+                on_finalized=lambda result: {
+                    "validators": self.new_set,
+                    "signer": new_signer,
+                    "activation_height": 2,
+                    "chain_height": 2,
+                },
+            )
+            finalized = self._proposal_and_precommits(engine, self.old)
+            self.assertIsNotNone(finalized)
+            self.assertTrue(engine.active)
+            self.assertIs(engine.signer, new_signer)
+            self.assertEqual(engine.height, 2)
+            self.assertEqual(engine.validator_set_hash, validator_set_hash(self.new_set))
+            with self.assertRaises(RuntimeError):
+                old_signer.sign_vote(0, "prevote", self.block_hash)
+            new_signer.close()
+
+    def test_removed_validator_becomes_observer_and_cannot_sign(self):
+        with tempfile.TemporaryDirectory() as directory:
+            old_signer = ConsensusSigner(
+                self.old[0][0], self.chain_id, self.old_set,
+                Path(directory) / "old-state.json",
+            )
+            engine = ConsensusEngine(old_signer, lambda block: block.get("hash"))
+            engine.activate_validator_set(self.new_set, None, activation_height=2)
+            self.assertFalse(engine.active)
+            self.assertIsNone(engine.signer)
+            with self.assertRaisesRegex(RuntimeError, "not a member"):
+                engine.request_round_change(1)
+
+            finalized = self._proposal_and_precommits(engine, self.new)
+            self.assertIsNotNone(finalized)
+            self.assertEqual(engine.height, 2)
+            self.assertEqual(engine.validator_set_hash, validator_set_hash(self.new_set))
+
+    def test_observer_engine_can_validate_proposals_without_a_signing_key(self):
+        engine = ConsensusEngine(
+            None, lambda block: block.get("hash"),
+            validators=self.new_set, chain_id=self.chain_id, initial_height=1,
+        )
+        proposer = select_proposer(self.new_set, 1, 0)
+        proposer_key = next(
+            key for key, record in self.new if record["public_key"] == proposer
+        )
+        proposal = make_proposal(
+            proposer_key, self.chain_id, 1, 0, self.block_hash,
+            validator_set_hash(self.new_set),
+        )
+        self.assertTrue(engine.receive_proposal(proposal, {"hash": self.block_hash}))
+        with self.assertRaisesRegex(RuntimeError, "not a member"):
+            engine.prevote(self.block_hash)
+
+
 if __name__ == "__main__":
     unittest.main()
