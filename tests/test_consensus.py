@@ -1302,7 +1302,9 @@ class LiveValidatorRotationTests(unittest.TestCase):
                 Path(directory) / "old-state.json",
             )
             engine = ConsensusEngine(old_signer, lambda block: block.get("hash"))
-            engine.activate_validator_set(self.new_set, None, activation_height=2)
+            engine.activate_validator_set(
+                self.new_set, None, activation_height=2, chain_height=2
+            )
             self.assertFalse(engine.active)
             self.assertIsNone(engine.signer)
             with self.assertRaisesRegex(RuntimeError, "not a member"):
