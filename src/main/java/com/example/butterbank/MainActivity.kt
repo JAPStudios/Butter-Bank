@@ -499,7 +499,7 @@ class MainActivity : Activity() {
     private fun validateNodeUrl(raw: String): String {
         val uri = Uri.parse(raw)
         if (uri.scheme != "https" || uri.host.isNullOrBlank()
-            || uri.encodedUserInfo != null
+            || uri.encodedAuthority?.contains('@') == true
             || uri.encodedPath !in listOf("", "/")
             || uri.encodedQuery != null || uri.encodedFragment != null
             || uri.port == 0 || uri.port > 65535
