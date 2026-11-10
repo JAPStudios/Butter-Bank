@@ -42,6 +42,12 @@ class BFTAPI(API):
             chain = self.chain
             key = self.consensus_key
             engine = self.consensus_server.engine
+            if not engine.active:
+                self.sendj(409, {
+                    "ok": False,
+                    "error": "validator signing state is unavailable; this node is operating as an observer",
+                })
+                return
             proposer = key.public_key().public_bytes_raw().hex()
             selected = select_proposer(chain.validators, engine.height, engine.round)
             if proposer != selected:
