@@ -6,7 +6,7 @@ from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from wallet import encrypt_legacy_wallet, public_hex, read_wallet, write_new_wallet
+from wallet import change_wallet_passphrase, encrypt_legacy_wallet, public_hex, read_wallet, write_new_wallet
 
 
 class EncryptedWalletTests(unittest.TestCase):
@@ -59,6 +59,26 @@ class EncryptedWalletTests(unittest.TestCase):
         loaded, loaded_public = read_wallet(self.path, self.passphrase)
         self.assertEqual(loaded_public, public)
         self.assertEqual(loaded.private_bytes_raw().hex(), private)
+
+    def test_passphrase_rotation_preserves_the_keypair(self):
+        key = Ed25519PrivateKey.generate()
+        old_passphrase = self.passphrase
+        new_passphrase = "a different secure passphrase"
+        public = write_new_wallet(self.path, key, old_passphrase)
+        change_wallet_passphrase(self.path, old_passphrase, new_passphrase)
+        with self.assertRaises(ValueError):
+            read_wallet(self.path, old_passphrase)
+        loaded, loaded_public = read_wallet(self.path, new_passphrase)
+        self.assertEqual(loaded_public, public)
+        self.assertEqual(loaded.private_bytes_raw(), key.private_bytes_raw())
+
+    def test_wrong_old_passphrase_does_not_change_wallet_file(self):
+        key = Ed25519PrivateKey.generate()
+        write_new_wallet(self.path, key, self.passphrase)
+        before = self.path.read_bytes()
+        with self.assertRaises(ValueError):
+            change_wallet_passphrase(self.path, "wrong old passphrase", "another secure passphrase")
+        self.assertEqual(self.path.read_bytes(), before)
 
     def test_create_refuses_to_overwrite_existing_wallet(self):
         key = Ed25519PrivateKey.generate()
