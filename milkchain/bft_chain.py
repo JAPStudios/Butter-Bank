@@ -8,6 +8,12 @@ from urllib.parse import urlparse
 from node import Chain, bhash, canon, sha, MAX_TXS
 from consensus import verify_commit_certificate, verify_prevote_certificate, validator_set_hash, select_proposer
 from admission import validator_set_from_certificates
+from validator_transitions import (
+    verify_transition_certificate, verify_transition_history,
+    validator_set_at_height,
+)
+
+
 def bft_block_hash(block):
     """Hash consensus-relevant transition data together with the ordinary block."""
     fields = {key: block[key] for key in (
@@ -16,12 +22,6 @@ def bft_block_hash(block):
     if "validator_transition" in block:
         fields["validator_transition"] = block["validator_transition"]
     return sha(canon(fields))
-
-
-from validator_transitions import (
-    verify_transition_certificate, verify_transition_history,
-    validator_set_at_height,
-)
 
 
 class BFTChain(Chain):
@@ -330,8 +330,8 @@ class BFTChain(Chain):
             self.pool = [tx for tx in self.pool if sha(canon(tx)) not in included]
             try:
                 self._revalidate_pool()
-                self.save()
                 self._refresh_active_validator_set()
+                self.save()
             except Exception:
                 self.blocks = previous_blocks
                 self.pool = previous_pool
