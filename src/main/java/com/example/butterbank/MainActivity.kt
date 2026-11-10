@@ -764,10 +764,9 @@ class MainActivity : Activity() {
                     if (pendingNonce >= nonce) nonce = pendingNonce + BigInteger.ONE
                 }
 
-                val canonical = canonicalTransaction(chainId, sender, recipient, amount, nonce)
+                val canonical = MilkchainTransaction.canonicalBytes(chainId, sender, recipient, amount, nonce)
                 val signature = walletStore.sign(canonical).toHex()
-                val requestBody = String(canonical, StandardCharsets.UTF_8).dropLast(1) +
-                    ",\"signature\":\"$signature\"}"
+                val requestBody = MilkchainTransaction.signedJson(canonical, signature)
                 val response = postJson("$nodeUrl/tx", requestBody)
                 val accepted = response.optBoolean("accepted", false)
                 val message = response.optString("message", if (accepted) "accepted" else "rejected")
@@ -789,19 +788,6 @@ class MainActivity : Activity() {
                 }
             }
         }
-    }
-
-    private fun canonicalTransaction(
-        chainId: String,
-        sender: String,
-        recipient: String,
-        amount: BigInteger,
-        nonce: BigInteger
-    ): ByteArray {
-        val json = "{\"amount\":$amount,\"chain_id\":${JSONObject.quote(chainId)}," +
-            "\"fee\":0,\"nonce\":$nonce,\"recipient\":${JSONObject.quote(recipient)}," +
-            "\"sender\":${JSONObject.quote(sender)}}"
-        return json.toByteArray(StandardCharsets.UTF_8)
     }
 
     private fun postJson(address: String, body: String): JSONObject {
