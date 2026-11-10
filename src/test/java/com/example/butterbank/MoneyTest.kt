@@ -7,6 +7,18 @@ import java.util.Locale
 
 class MoneyTest {
     @Test
+    fun formatsTokenAtomicUnitsWithoutFloatingPointRounding() {
+        assertEquals("1.23456789", TokenAmount.formatAtomicUnits("123456789", 8))
+        assertEquals("1", TokenAmount.formatAtomicUnits("100000000", 8))
+        assertEquals("0.00000001", TokenAmount.formatAtomicUnits("1", 8))
+        assertEquals("123", TokenAmount.formatAtomicUnits("123", 0))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsUnsupportedTokenPrecision() {
+        TokenAmount.formatAtomicUnits("1", 19)
+    }
+    @Test
     fun parsesAmountsExactlyToCents() {
         assertEquals(1234L, Money.parsePositiveCents("12.34", Locale.US))
         assertEquals(100L, Money.parsePositiveCents("1", Locale.US))
