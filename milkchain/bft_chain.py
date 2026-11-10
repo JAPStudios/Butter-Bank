@@ -8,6 +8,16 @@ from urllib.parse import urlparse
 from node import Chain, bhash, canon, sha, MAX_TXS
 from consensus import verify_commit_certificate, verify_prevote_certificate, validator_set_hash, select_proposer
 from admission import validator_set_from_certificates
+def bft_block_hash(block):
+    """Hash consensus-relevant transition data together with the ordinary block."""
+    fields = {key: block[key] for key in (
+        "height", "previous_hash", "timestamp", "transactions", "nonce"
+    )}
+    if "validator_transition" in block:
+        fields["validator_transition"] = block["validator_transition"]
+    return sha(canon(fields))
+
+
 from validator_transitions import (
     verify_transition_certificate, verify_transition_history,
     validator_set_at_height,
@@ -168,17 +178,9 @@ class BFTChain(Chain):
                         or bool(recovery_fields & set(block)) != has_recovery
                         or bool(bft_fields & set(block)) != has_certificate):
                     return False
-                if require_certificates or index < len(blocks) - 1:
-                    if not has_certificate or set(block) not in (
-                        base_fields | bft_fields,
-                        base_fields | bft_fields | recovery_fields,
-                    ):
-                        return False
-                elif set(block) not in (
-                    base_fields,
-                    base_fields | bft_fields,
-                    base_fields | bft_fields | recovery_fields,
-                ):
+                if (require_certificates or index < len(blocks) - 1) and not has_certificate:
+                    return False
+                if block.get("hash") != bft_block_hash(block):
                     return False
                 if has_certificate:
                     round_number = block["commit_round"]
@@ -215,7 +217,9 @@ class BFTChain(Chain):
                         transitions, self.initial_validators, self.id
                     ):
                         return False
-                cleaned.append({key: block[key] for key in base_fields})
+                base_block = {key: block[key] for key in base_fields}
+                base_block["hash"] = bhash(base_block)
+                cleaned.append(base_block)
             old_diff = self.diff
             self.diff = 0
             try:
@@ -232,7 +236,7 @@ class BFTChain(Chain):
                 return None
             if not self.valid_chain(self.blocks + [block], require_certificates=False):
                 return None
-            return bhash(block)
+            return bft_block_hash(block)
 
     def build_proposal(self, proposer, round_number=0, validator_transition=None):
         """Build a candidate for the deterministic proposer of this height/round."""
@@ -265,7 +269,7 @@ class BFTChain(Chain):
             }
             if validator_transition is not None:
                 block["validator_transition"] = validator_transition
-            block["hash"] = bhash(block)
+            block["hash"] = bft_block_hash(block)
             return block
 
     def mine(self, miner):
