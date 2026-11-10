@@ -267,8 +267,15 @@ def main():
             engine.validator_set_hash != chain.validators_hash
             or engine.validator_activation_height != chain.validator_activation_height
         ):
-            return build_validator_activation(key, chain, base_state_path)
+            return {
+                "validators": chain.validators,
+                "activation_height": chain.validator_activation_height,
+                "chain_height": len(chain.blocks),
+            }
         return None
+
+    def create_current_signer():
+        return build_validator_activation(key, chain, base_state_path)["signer"]
 
     engine = ConsensusEngine(
         initial_activation["signer"],
@@ -278,6 +285,7 @@ def main():
         chain_id=chain.id,
         initial_height=len(chain.blocks),
         validator_activation_height=chain.validator_activation_height,
+        on_validator_set=create_current_signer,
     )
     engine_ref["engine"] = engine
 
