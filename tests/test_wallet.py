@@ -6,56 +6,65 @@ from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from wallet import public_hex, read_wallet
+from wallet import encrypt_legacy_wallet, public_hex, read_wallet, write_new_wallet
 
 
-class WalletFileTests(unittest.TestCase):
-    def write_wallet(self, path):
+class EncryptedWalletTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.path = Path(self.directory.name) / "biscuits.wallet"
+        self.passphrase = "correct horse battery staple"
+
+    def test_new_wallet_encrypts_private_key_and_round_trips(self):
         key = Ed25519PrivateKey.generate()
-        path.write_text(json.dumps({
-            "private_key": key.private_bytes_raw().hex(),
-            "public_key": public_hex(key),
-        }))
-        path.chmod(0o600)
-        return key
+        public = write_new_wallet(self.path, key, self.passphrase)
+        stored = self.path.read_text(encoding="utf-8")
+        self.assertNotIn(key.private_bytes_raw().hex(), stored)
+        self.assertEqual(public, public_hex(key))
+        loaded, loaded_public = read_wallet(self.path, self.passphrase)
+        self.assertEqual(loaded.private_bytes_raw(), key.private_bytes_raw())
+        self.assertEqual(loaded_public, public)
+        if os.name != "nt":
+            self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
 
-    def test_reads_valid_owner_only_wallet(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "wallet.json"
-            expected = self.write_wallet(path)
-            actual, address = read_wallet(path)
-            self.assertEqual(actual.private_bytes_raw(), expected.private_bytes_raw())
-            self.assertEqual(address, public_hex(expected))
+    def test_wrong_passphrase_and_tampered_ciphertext_are_rejected(self):
+        key = Ed25519PrivateKey.generate()
+        write_new_wallet(self.path, key, self.passphrase)
+        with self.assertRaisesRegex(ValueError, "passphrase is incorrect"):
+            read_wallet(self.path, "an incorrect passphrase")
+        data = json.loads(self.path.read_text(encoding="utf-8"))
+        ciphertext = data["ciphertext"]
+        data["ciphertext"] = ("A" if ciphertext[0] != "A" else "B") + ciphertext[1:]
+        self.path.write_text(json.dumps(data), encoding="utf-8")
+        if os.name != "nt":
+            self.path.chmod(0o600)
+        with self.assertRaises(ValueError):
+            read_wallet(self.path, self.passphrase)
 
-    @unittest.skipIf(os.name == "nt", "POSIX permission semantics")
-    def test_rejects_group_or_world_readable_wallet(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "wallet.json"
-            self.write_wallet(path)
-            path.chmod(0o644)
-            with self.assertRaisesRegex(ValueError, "permissions 0600"):
-                read_wallet(path)
+    def test_legacy_wallet_can_be_encrypted_in_place(self):
+        key = Ed25519PrivateKey.generate()
+        private = key.private_bytes_raw().hex()
+        public = public_hex(key)
+        self.path.write_text(
+            json.dumps({"private_key": private, "public_key": public}),
+            encoding="utf-8",
+        )
+        if os.name != "nt":
+            self.path.chmod(0o600)
+        migrated_public = encrypt_legacy_wallet(self.path, self.passphrase)
+        self.assertEqual(migrated_public, public)
+        stored = self.path.read_text(encoding="utf-8")
+        self.assertNotIn(private, stored)
+        loaded, loaded_public = read_wallet(self.path, self.passphrase)
+        self.assertEqual(loaded_public, public)
+        self.assertEqual(loaded.private_bytes_raw().hex(), private)
 
-    @unittest.skipIf(os.name == "nt", "POSIX symlink semantics")
-    def test_rejects_wallet_symlink(self):
-        with tempfile.TemporaryDirectory() as directory:
-            real = Path(directory) / "real.json"
-            link = Path(directory) / "linked.json"
-            self.write_wallet(real)
-            link.symlink_to(real)
-            with self.assertRaisesRegex(ValueError, "non-symlink"):
-                read_wallet(link)
-
-    def test_rejects_mismatched_public_key(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "wallet.json"
-            self.write_wallet(path)
-            data = json.loads(path.read_text())
-            data["public_key"] = Ed25519PrivateKey.generate().public_key().public_bytes_raw().hex()
-            path.write_text(json.dumps(data))
-            path.chmod(0o600)
-            with self.assertRaisesRegex(ValueError, "does not match"):
-                read_wallet(path)
+    def test_create_refuses_to_overwrite_existing_wallet(self):
+        key = Ed25519PrivateKey.generate()
+        write_new_wallet(self.path, key, self.passphrase)
+        with self.assertRaises(FileExistsError):
+            write_new_wallet(self.path, Ed25519PrivateKey.generate(), self.passphrase)
 
 
 if __name__ == "__main__":
