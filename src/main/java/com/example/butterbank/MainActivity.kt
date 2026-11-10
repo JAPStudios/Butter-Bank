@@ -234,6 +234,20 @@ class MainActivity : Activity() {
     }
 
     private fun renderDashboard() {
+        if (storageUnavailable) {
+            balanceValue.text = "Unavailable"
+            incomeValue.text = "Unavailable"
+            expenseValue.text = "Unavailable"
+            budgetValue.text = "Unavailable"
+            historyContainer.removeAllViews()
+            historyContainer.addView(label(
+                "Encrypted records could not be unlocked. Stored data has been preserved; no balances are shown.",
+                14,
+                0xFF8B3D32.toInt(),
+                true
+            ))
+            return
+        }
         val income = LedgerMath.totalCents(entries, EntryType.INCOME)
         val expenses = LedgerMath.totalCents(entries, EntryType.EXPENSE)
         val balance = LedgerMath.balanceCents(entries)
