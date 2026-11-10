@@ -185,7 +185,8 @@ class BFTChain(Chain):
                     return False
                 if (require_certificates or index < len(blocks) - 1) and not has_certificate:
                     return False
-                if (block.get("previous_hash") != blocks[index - 1].get("hash")
+                if (not isinstance(blocks[index - 1], dict)
+                        or block.get("previous_hash") != blocks[index - 1].get("hash")
                         or block.get("hash") != bft_block_hash(block)):
                     return False
                 if has_certificate:
