@@ -440,7 +440,18 @@ class API(BaseHTTPRequestHandler):
             with self.chain.lock: b,n=self.chain.state()
             self.sendj(200,{'balances':b,'nonces':n})
         elif p=='/mempool':
-            with self.chain.lock: self.sendj(200,{'transactions':list(self.chain.pool)})
+            query=parse_qs(urlparse(self.path).query,keep_blank_values=True)
+            if query and (
+                set(query)!={'address'} or len(query['address'])!=1
+                or not ishex(query['address'][0],32)
+            ):
+                self.sendj(400,{'error':'mempool filter requires one 32-byte hexadecimal address'});return
+            address=query['address'][0].lower() if query else None
+            with self.chain.lock:
+                transactions=list(self.chain.pool)
+                if address is not None:
+                    transactions=[tx for tx in transactions if tx.get('sender')==address]
+            self.sendj(200,{'transactions':transactions})
         elif p=='/peers': self.sendj(200,{'peers':list(self.peers)})
         else:self.sendj(404,{'error':'not found'})
     def do_POST(self):
