@@ -180,7 +180,7 @@ def write_new_wallet(path, key, passphrase):
 
 
 def _replace_wallet_file(target, key, passphrase, original_metadata):
-    payload = json.dumps(_wallet_payload(key, passphrase), sort_keys=True, indent=2) + "\\n"
+    payload = json.dumps(_wallet_payload(key, passphrase), sort_keys=True, indent=2) + "\n"
     descriptor, temporary = tempfile.mkstemp(
         prefix=target.name + ".", suffix=".tmp", dir=target.parent
     )
