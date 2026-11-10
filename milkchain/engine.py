@@ -46,6 +46,11 @@ class ConsensusEngine:
             for key, power in validator_map.items()
         ]
         self.validator_set_hash = validator_set_hash(self.validators)
+        if (not isinstance(validator_activation_height, int)
+                or isinstance(validator_activation_height, bool)
+                or validator_activation_height < 1
+                or validator_activation_height > self._height):
+            raise ValueError("validator activation height is invalid")
         self.validator_activation_height = validator_activation_height
         self.total_power = sum(validator_map.values())
         self.active = signer is not None
@@ -76,7 +81,10 @@ class ConsensusEngine:
         normalized = normalize_validator_set(validators)
         target_height = self._height if chain_height is None else chain_height
         if (not isinstance(target_height, int) or isinstance(target_height, bool)
-                or target_height < 1):
+                or target_height < 1
+                or not isinstance(activation_height, int)
+                or isinstance(activation_height, bool)
+                or activation_height < 1 or activation_height > target_height):
             raise ValueError("validator activation height is invalid")
         if signer is not None:
             if not isinstance(signer, ConsensusSigner):
