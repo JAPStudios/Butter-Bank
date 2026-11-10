@@ -88,7 +88,9 @@ object TokenAmount {
         if (decimals !in 0..18) return null
         val symbols = DecimalFormatSymbols.getInstance(locale)
         val separator = symbols.decimalSeparator
-        val normalized = if (separator == '.') raw.trim() else raw.trim().replace(separator, '.')
+        val input = raw.trim()
+        if (symbols.groupingSeparator != separator && input.contains(symbols.groupingSeparator)) return null
+        val normalized = if (separator == '.') input else input.replace(separator, '.')
         return try {
             val amount = BigDecimal(normalized)
             if (amount <= BigDecimal.ZERO) null
