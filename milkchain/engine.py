@@ -66,16 +66,23 @@ class ConsensusEngine:
         return self._height
 
     @_synchronized
-    def activate_validator_set(self, validators, signer=None, activation_height=1):
+    def activate_validator_set(
+        self, validators, signer=None, activation_height=1, chain_height=None
+    ):
         """Switch to the set committed by finalized history without reusing old signer state."""
         normalized = normalize_validator_set(validators)
+        target_height = self._height if chain_height is None else chain_height
+        if (not isinstance(target_height, int) or isinstance(target_height, bool)
+                or target_height < 1):
+            raise ValueError("validator activation height is invalid")
         if signer is not None:
             if not isinstance(signer, ConsensusSigner):
                 raise TypeError("replacement signer must be a ConsensusSigner or None")
-            if (signer.chain_id != self.chain_id or signer.height != self._height
+            if (signer.chain_id != self.chain_id or signer.height != target_height
                     or signer.validators != normalized):
                 raise ValueError("replacement signer does not match the active chain state")
         old_signer = self.signer
+        self._height = target_height
         self.signer = signer
         self.active = signer is not None
         self.validator_power = normalized
@@ -235,12 +242,12 @@ class ConsensusEngine:
                 self._height += 1
             if activation is not None:
                 if not isinstance(activation, dict) or set(activation) != {
-                    "validators", "signer", "activation_height"
+                    "validators", "signer", "activation_height", "chain_height"
                 }:
                     raise ValueError("validator activation callback returned an invalid result")
                 self.activate_validator_set(
                     activation["validators"], activation["signer"],
-                    activation["activation_height"],
+                    activation["activation_height"], activation["chain_height"],
                 )
             self.finalized[result["height"]] = result
             self.round = 0
