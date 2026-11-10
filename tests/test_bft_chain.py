@@ -20,6 +20,7 @@ from signer import ConsensusSigner
 from bft_node import BFTAPI, load_validator_key
 from keygen import generate_keypair
 from consensus import make_vote, validator_set_hash
+from validator_transitions import make_transition_certificate
 
 
 class BFTChainTests(unittest.TestCase):
@@ -138,6 +139,96 @@ class BFTChainTests(unittest.TestCase):
             reopened = BFTChain(self.cfg, path)
             self.assertEqual(reopened.blocks, chain.blocks)
             self.assertTrue(reopened.valid_chain(reopened.blocks))
+
+    def test_committed_transition_changes_validator_set_at_activation_height(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "transition-chain.json"
+            chain = BFTChain(self.cfg, path)
+            next_keys = [Ed25519PrivateKey.generate() for _ in range(4)]
+            next_set = [
+                {"public_key": key.public_key().public_bytes_raw().hex(),
+                 "voting_power": 1}
+                for key in next_keys
+            ]
+            certificate = make_transition_certificate(
+                self.validator_keys[:3], self.chain_id, 2,
+                chain.initial_validators, next_set,
+            )
+
+            old_proposer = select_proposer(chain.validators, 1, 0)
+            first = chain.build_proposal(
+                old_proposer, validator_transition=certificate
+            )
+            old_by_public = {
+                key.public_key().public_bytes_raw().hex(): key
+                for key in self.validator_keys
+            }
+            old_votes = [
+                make_vote(old_by_public[item["public_key"]], self.chain_id,
+                          1, 0, "precommit", first["hash"],
+                          validator_set_hash(chain.initial_validators))
+                for item in chain.initial_validators[:3]
+            ]
+            accepted, message = chain.accept_finalized_block(first, 0, old_votes)
+            self.assertTrue(accepted, message)
+            self.assertEqual(
+                chain.validators,
+                sorted(next_set, key=lambda item: item["public_key"]),
+            )
+
+            next_proposer = select_proposer(chain.validators, 2, 0)
+            second = chain.build_proposal(next_proposer)
+            next_by_public = {
+                key.public_key().public_bytes_raw().hex(): key for key in next_keys
+            }
+            next_votes = [
+                make_vote(next_by_public[item["public_key"]], self.chain_id,
+                          2, 0, "precommit", second["hash"],
+                          validator_set_hash(next_set))
+                for item in chain.validators[:3]
+            ]
+            accepted, message = chain.accept_finalized_block(second, 0, next_votes)
+            self.assertTrue(accepted, message)
+
+            reopened = BFTChain(self.cfg, path)
+            self.assertEqual(reopened.validators, chain.validators)
+            self.assertTrue(reopened.valid_chain(reopened.blocks))
+
+            tampered = json.loads(json.dumps(reopened.blocks))
+            tampered[1]["validator_transition"]["activation_height"] = 3
+            self.assertFalse(reopened.valid_chain(tampered))
+
+    def test_transition_certificate_cannot_be_added_after_its_activation_height(self):
+        with tempfile.TemporaryDirectory() as directory:
+            chain = BFTChain(self.cfg, Path(directory) / "late-transition.json")
+            old_by_public = {
+                key.public_key().public_bytes_raw().hex(): key
+                for key in self.validator_keys
+            }
+            first_proposer = select_proposer(chain.validators, 1, 0)
+            first = chain.build_proposal(first_proposer)
+            first_votes = [
+                make_vote(old_by_public[item["public_key"]], self.chain_id,
+                          1, 0, "precommit", first["hash"],
+                          validator_set_hash(chain.initial_validators))
+                for item in chain.initial_validators[:3]
+            ]
+            accepted, message = chain.accept_finalized_block(first, 0, first_votes)
+            self.assertTrue(accepted, message)
+
+            next_keys = [Ed25519PrivateKey.generate() for _ in range(4)]
+            next_set = [
+                {"public_key": key.public_key().public_bytes_raw().hex(),
+                 "voting_power": 1}
+                for key in next_keys
+            ]
+            certificate = make_transition_certificate(
+                self.validator_keys[:3], self.chain_id, 2,
+                chain.initial_validators, next_set,
+            )
+            proposer = select_proposer(chain.validators, 2, 0)
+            block = chain.build_proposal(proposer, validator_transition=certificate)
+            self.assertIsNone(chain.validate_proposal_block(block))
 
     def test_bft_chain_rejects_reward_redirection_away_from_selected_proposer(self):
         with tempfile.TemporaryDirectory() as directory:
