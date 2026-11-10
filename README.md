@@ -6,9 +6,11 @@ Butter Bank is a development repository with three distinct components:
 - **Android prototype:** the Kotlin Android application built from the root Gradle project.
 - **Milkchain prototype:** experimental Python blockchain, wallet, and transaction tools.
 
-These are prototypes, not a production bank or production payment network. The Android application currently displays an informational screen only; it does not open accounts, hold deposits, process transfers, or connect to a banking provider. The funding page intentionally keeps cryptocurrency contributions disabled until a receiving asset, network, and address have been independently verified and configured.
+These are prototypes, not a production bank or production payment network. The Android application currently provides an offline personal ledger for manually entered income, expenses, and monthly spending limits. Its records are stored locally on the device and are not verified bank transactions or funds held by a financial institution. It does not open accounts, hold deposits, process transfers, issue credit, or connect to a banking provider. The funding page intentionally keeps cryptocurrency contributions disabled until a receiving asset, network, and address have been independently verified and configured.
 
 ## Android application
+
+The current offline ledger includes exact cents-based money parsing, recorded income and expense totals, a monthly spending limit, and local transaction history. Long-press a history row to delete a manually entered record. The app uses local preferences; the prototype does not yet encrypt those records or synchronize them across devices. Do not enter banking credentials or treat its displayed balance as available funds.
 
 Requirements: JDK 17, Android SDK Platform 35, and Gradle 8.9 or a compatible Android Studio installation.
 
