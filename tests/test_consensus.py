@@ -1312,7 +1312,7 @@ class LiveValidatorRotationTests(unittest.TestCase):
 
             finalized = self._proposal_and_precommits(engine, self.new)
             self.assertIsNotNone(finalized)
-            self.assertEqual(engine.height, 2)
+            self.assertEqual(engine.height, 3)
             self.assertEqual(engine.validator_set_hash, validator_set_hash(self.new_set))
 
     def test_observer_engine_can_validate_proposals_without_a_signing_key(self):
