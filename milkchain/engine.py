@@ -263,18 +263,19 @@ class ConsensusEngine:
                 }:
                     raise ValueError("validator activation callback returned an invalid result")
                 replacement = None
-                self.pending_validator_recovery = False
+                recovery_failed = False
                 if self.on_validator_set is not None:
                     try:
                         replacement = self.on_validator_set()
                     except Exception:
                         # Finality is durable; remain an observer if new signer
                         # state cannot yet be opened safely. The sync loop retries.
-                        self.pending_validator_recovery = True
+                        recovery_failed = True
                 self.activate_validator_set(
                     activation["validators"], replacement,
                     activation["activation_height"], activation["chain_height"],
                 )
+                self.pending_validator_recovery = recovery_failed
             self.finalized[result["height"]] = result
             self.round = 0
             self.proposals.clear()
