@@ -75,6 +75,11 @@ class BFTChain(Chain):
             transitions, self.initial_validators, self.id, len(self.blocks)
         )
         self.validators_hash = validator_set_hash(self.validators)
+        self.validator_activation_height = max(
+            (item["activation_height"] for item in transitions
+             if item["activation_height"] <= len(self.blocks)),
+            default=1,
+        )
 
     def _transition_history(self, blocks):
         """Extract committed transition certificates in block order."""
