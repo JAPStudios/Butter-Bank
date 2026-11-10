@@ -728,9 +728,7 @@ class MainActivity : Activity() {
             return
         }
         val configuredAddress = accountAddressInput.text.toString().trim().lowercase(Locale.ROOT)
-        if (configuredAddress != sender) {
-            accountAddressInput.setText(sender)
-        }
+        if (configuredAddress != sender) accountAddressInput.setText(sender)
         val recipient = recipientInput.text.toString().trim().lowercase(Locale.ROOT)
         if (!recipient.matches(Regex("^[0-9a-f]{64}$")) || recipient == sender) {
             toast("Enter a valid recipient address different from the sending wallet.")
@@ -741,8 +739,6 @@ class MainActivity : Activity() {
 
         networkExecutor.execute {
             try {
-                val status = fetchJson("$nodeUrl/status")
-                val chainId = status.getString("chain_id")
                 val account = fetchJson("$nodeUrl/balance?address=$sender")
                 if (account.getString("address") != sender) {
                     throw IOException("The node returned a different account address.")
@@ -753,39 +749,89 @@ class MainActivity : Activity() {
                     ?: throw IllegalArgumentException("Enter a positive amount with no more than $decimals decimal places.")
                 val balance = BigInteger(account.get("balance").toString())
                 if (amount > balance) throw IllegalArgumentException("The account balance is insufficient.")
+                val displayAmount = TokenAmount.formatAtomicUnits(amount.toString(), decimals)
+                val symbol = account.optString("symbol", "Biscuits")
 
-                val mempool = fetchJson("$nodeUrl/mempool?address=$sender")
-                val pending = mempool.getJSONArray("transactions")
-                var nonce = BigInteger(account.get("nonce").toString()) + BigInteger.ONE
-                for (index in 0 until pending.length()) {
-                    val item = pending.getJSONObject(index)
-                    if (item.optString("sender") != sender) continue
-                    val pendingNonce = BigInteger(item.get("nonce").toString())
-                    if (pendingNonce >= nonce) nonce = pendingNonce + BigInteger.ONE
-                }
-
-                val canonical = MilkchainTransaction.canonicalBytes(chainId, sender, recipient, amount, nonce)
-                val signature = walletStore.sign(canonical).toHex()
-                val requestBody = MilkchainTransaction.signedJson(canonical, signature)
-                val response = postJson("$nodeUrl/tx", requestBody)
-                val accepted = response.optBoolean("accepted", false)
-                val message = response.optString("message", if (accepted) "accepted" else "rejected")
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
-                    sendButton.isEnabled = true
-                    if (accepted) {
-                        toast("Transaction accepted by the node; awaiting block finality.")
-                        loadMilkchainAccount()
-                    } else {
-                        toast("Transaction rejected: $message")
-                    }
+                    val dialog = AlertDialog.Builder(this)
+                        .setTitle("Confirm Biscuits transfer")
+                        .setMessage(
+                            "Send $displayAmount $symbol to $recipient?\n\n" +
+                                "Network transaction fee: 0.\n" +
+                                "A finalized blockchain transfer cannot be reversed."
+                        )
+                        .setNegativeButton("Cancel") { _, _ -> sendButton.isEnabled = true }
+                        .setPositiveButton("Submit transfer") { _, _ ->
+                            networkExecutor.execute {
+                                submitConfirmedTransfer(nodeUrl, sender, recipient, amountText)
+                            }
+                        }
+                        .create()
+                    dialog.setOnCancelListener { sendButton.isEnabled = true }
+                    dialog.show()
                 }
             } catch (error: Exception) {
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     sendButton.isEnabled = true
-                    toast(error.message ?: "Could not submit the Milkchain transaction.")
+                    toast(error.message ?: "Could not prepare the Milkchain transfer.")
                 }
+            }
+        }
+    }
+
+    private fun submitConfirmedTransfer(
+        nodeUrl: String,
+        sender: String,
+        recipient: String,
+        amountText: String
+    ) {
+        try {
+            val status = fetchJson("$nodeUrl/status")
+            val chainId = status.getString("chain_id")
+            val account = fetchJson("$nodeUrl/balance?address=$sender")
+            if (account.getString("address") != sender) {
+                throw IOException("The node returned a different account address.")
+            }
+            val decimals = account.getInt("decimals")
+            if (decimals !in 0..18) throw IOException("The node returned unsupported Biscuits precision.")
+            val amount = TokenAmount.parsePositiveAtomicUnits(amountText, decimals)
+                ?: throw IllegalArgumentException("Enter a positive amount with no more than $decimals decimal places.")
+            val balance = BigInteger(account.get("balance").toString())
+            if (amount > balance) throw IllegalArgumentException("The account balance is now insufficient.")
+
+            val mempool = fetchJson("$nodeUrl/mempool?address=$sender")
+            val pending = mempool.getJSONArray("transactions")
+            var nonce = BigInteger(account.get("nonce").toString()) + BigInteger.ONE
+            for (index in 0 until pending.length()) {
+                val item = pending.getJSONObject(index)
+                if (item.optString("sender") != sender) continue
+                val pendingNonce = BigInteger(item.get("nonce").toString())
+                if (pendingNonce >= nonce) nonce = pendingNonce + BigInteger.ONE
+            }
+
+            val canonical = MilkchainTransaction.canonicalBytes(chainId, sender, recipient, amount, nonce)
+            val signature = walletStore.sign(canonical).toHex()
+            val requestBody = MilkchainTransaction.signedJson(canonical, signature)
+            val response = postJson("$nodeUrl/tx", requestBody)
+            val accepted = response.optBoolean("accepted", false)
+            val message = response.optString("message", if (accepted) "accepted" else "rejected")
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                sendButton.isEnabled = true
+                if (accepted) {
+                    toast("Transaction accepted by the node; awaiting block finality.")
+                    loadMilkchainAccount()
+                } else {
+                    toast("Transaction rejected: $message")
+                }
+            }
+        } catch (error: Exception) {
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                sendButton.isEnabled = true
+                toast(error.message ?: "Could not submit the Milkchain transaction.")
             }
         }
     }
