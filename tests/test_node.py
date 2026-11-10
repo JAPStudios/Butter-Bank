@@ -380,6 +380,92 @@ class ChainPaginationTests(unittest.TestCase):
                     fetch_peer_chain("https://peer.test", {"height": height})
 
 
+class AccountQueryApiTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.sender_key, _, self.sender = wallet()
+        self.recipient_key, _, self.recipient = wallet()
+        self.miner_key, _, self.miner = wallet()
+        cfg = {
+            "chain_id": "account-query-test",
+            "difficulty": 1,
+            "block_reward": 50,
+            "genesis_allocations": {self.sender: 1000},
+            "symbol": "Biscuits",
+            "decimals": 8,
+        }
+        self.chain = Chain(cfg, Path(self.temp.name) / "account-query-chain.json")
+        tx = {
+            "chain_id": self.chain.id,
+            "sender": self.sender,
+            "recipient": self.recipient,
+            "amount": 250,
+            "fee": 2,
+            "nonce": 1,
+        }
+        tx["signature"] = self.sender_key.sign(signing_bytes(tx)).hex()
+        self.assertEqual(self.chain.add_tx(tx), (True, "accepted"))
+        self.chain.mine(self.miner)
+
+        API.chain = self.chain
+        API.peers = []
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), API)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.addCleanup(self.server.shutdown)
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.thread.join, 2)
+        self.base_url = f"http://127.0.0.1:{self.server.server_port}"
+
+    def test_balance_endpoint_returns_one_account_and_atomic_units(self):
+        sender = get(f"{self.base_url}/balance?address={self.sender}")
+        recipient = get(f"{self.base_url}/balance?address={self.recipient}")
+        miner = get(f"{self.base_url}/balance?address={self.miner}")
+        self.assertEqual(sender["balance"], 748)
+        self.assertEqual(sender["nonce"], 1)
+        self.assertEqual(recipient["balance"], 250)
+        self.assertEqual(miner["balance"], 52)
+        self.assertEqual(sender["symbol"], "Biscuits")
+        self.assertEqual(sender["decimals"], 8)
+
+    def test_history_endpoint_returns_newest_first_paginated_activity(self):
+        sender_history = get(f"{self.base_url}/history?address={self.sender}&limit=10")
+        self.assertEqual(sender_history["total"], 2)
+        self.assertEqual(sender_history["history"][0]["direction"], "sent")
+        self.assertEqual(sender_history["history"][0]["amount"], 250)
+        self.assertEqual(sender_history["history"][0]["fee"], 2)
+        self.assertEqual(sender_history["history"][1]["type"], "genesis")
+
+        recipient_history = get(f"{self.base_url}/history?address={self.recipient}")
+        self.assertEqual(recipient_history["total"], 1)
+        self.assertEqual(recipient_history["history"][0]["direction"], "received")
+
+        miner_history = get(f"{self.base_url}/history?address={self.miner}")
+        self.assertEqual(miner_history["history"][0]["type"], "coinbase")
+        self.assertEqual(miner_history["history"][0]["amount"], 52)
+
+        first_page = get(f"{self.base_url}/history?address={self.sender}&start=0&limit=1")
+        second_page = get(f"{self.base_url}/history?address={self.sender}&start=1&limit=1")
+        self.assertEqual(len(first_page["history"]), 1)
+        self.assertEqual(len(second_page["history"]), 1)
+        self.assertNotEqual(
+            first_page["history"][0]["transaction_index"],
+            second_page["history"][0]["transaction_index"],
+        )
+
+    def test_account_query_endpoints_reject_invalid_addresses_and_page_sizes(self):
+        for path in (
+            "/balance?address=not-an-address",
+            "/balance",
+            f"/history?address={self.sender}&limit=101",
+            f"/history?address={self.sender}&start=-1",
+            f"/history?address={self.sender}&limit=abc",
+        ):
+            with self.subTest(path=path), self.assertRaises(Exception):
+                get(f"{self.base_url}{path}")
+
+
 if __name__ == "__main__":
     unittest.main()
 
