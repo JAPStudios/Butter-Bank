@@ -33,7 +33,8 @@ import java.util.UUID
  * represent a balance held by a financial institution.
  */
 class MainActivity : Activity() {
-    private val preferences by lazy { getSharedPreferences("butter_bank_local", MODE_PRIVATE) }
+    private val ledgerStore by lazy { LedgerStore(this) }
+    private var storageUnavailable = false
     private val entries = mutableListOf<LedgerEntry>()
 
     private lateinit var balanceValue: TextView
@@ -54,6 +55,13 @@ class MainActivity : Activity() {
         loadLocalData()
         setContentView(buildScreen())
         renderDashboard()
+        if (storageUnavailable) {
+            AlertDialog.Builder(this)
+                .setTitle("Ledger storage unavailable")
+                .setMessage("The encrypted ledger could not be unlocked. Existing stored data has been preserved. No changes can be saved until storage is available again.")
+                .setPositiveButton("OK", null)
+                .show()
+        }
     }
 
     private fun buildScreen(): View {
@@ -131,11 +139,15 @@ class MainActivity : Activity() {
                 if (parsed == null) {
                     toast("Enter a positive amount with no more than two decimal places.")
                 } else {
+                    val previousBudget = monthlyBudgetCents
                     monthlyBudgetCents = parsed
-                    preferences.edit().putLong(KEY_BUDGET, parsed).apply()
-                    budgetInput.text.clear()
-                    renderDashboard()
-                    toast("Monthly limit saved on this device.")
+                    if (saveLocalData()) {
+                        budgetInput.text.clear()
+                        renderDashboard()
+                        toast("Monthly limit saved securely on this device.")
+                    } else {
+                        monthlyBudgetCents = previousBudget
+                    }
                 }
             })
         })
@@ -168,7 +180,7 @@ class MainActivity : Activity() {
         })
 
         page.addView(label(
-            "Prototype limitation: these are manually entered personal records, not verified bank transactions or available funds. Data remains in this app's local storage and is not encrypted by this prototype.",
+            "Prototype limitation: these are manually entered personal records, not verified bank transactions or available funds. Records are encrypted at rest with an Android Keystore key and remain on this device.",
             12,
             0xFF5B685F.toInt()
         ).apply { setPadding(dp(3), dp(16), dp(3), 0) })
@@ -210,7 +222,10 @@ class MainActivity : Activity() {
             return
         }
         entries.add(0, newEntry)
-        saveLocalData()
+        if (!saveLocalData()) {
+            entries.removeAll { it.id == newEntry.id }
+            return
+        }
         titleInput.text.clear()
         amountInput.text.clear()
         categoryInput.text.clear()
@@ -271,9 +286,10 @@ class MainActivity : Activity() {
                     .setMessage("This removes the manually entered record from this device.")
                     .setNegativeButton("Cancel", null)
                     .setPositiveButton("Delete") { _, _ ->
+                        val originalIndex = entries.indexOfFirst { it.id == entry.id }
                         entries.removeAll { it.id == entry.id }
-                        saveLocalData()
-                        renderDashboard()
+                        if (saveLocalData()) renderDashboard()
+                        else if (originalIndex >= 0) entries.add(originalIndex.coerceAtMost(entries.size), entry)
                     }
                     .show()
                 true
@@ -296,50 +312,57 @@ class MainActivity : Activity() {
     }
 
     private fun loadLocalData() {
-        monthlyBudgetCents = if (preferences.contains(KEY_BUDGET)) {
-            preferences.getLong(KEY_BUDGET, 0L).takeIf { it > 0L }
-        } else null
-
-        val stored = preferences.getString(KEY_ENTRIES, "[]") ?: "[]"
         try {
-            val array = JSONArray(stored)
+            val snapshot = ledgerStore.load()
+            monthlyBudgetCents = snapshot.monthlyBudgetCents
+            val array = JSONArray(snapshot.entriesJson)
             for (index in 0 until array.length()) {
                 val item = array.getJSONObject(index)
                 val type = EntryType.valueOf(item.getString("type"))
                 val amount = item.getLong("amountCents")
-                if (amount <= 0L) continue
-                entries.add(
-                    LedgerEntry(
-                        id = item.getString("id"),
-                        description = item.getString("description"),
-                        amountCents = amount,
-                        type = type,
-                        category = item.optString("category", "Uncategorized"),
-                        timestampMillis = item.getLong("timestampMillis")
-                    )
-                )
+                if (amount <= 0L) throw IllegalArgumentException("Invalid stored amount.")
+                entries.add(LedgerEntry(
+                    id = item.getString("id"),
+                    description = item.getString("description"),
+                    amountCents = amount,
+                    type = type,
+                    category = item.optString("category", "Uncategorized"),
+                    timestampMillis = item.getLong("timestampMillis")
+                ))
             }
+            LedgerMath.totalCents(entries, EntryType.INCOME)
+            LedgerMath.totalCents(entries, EntryType.EXPENSE)
+            LedgerMath.balanceCents(entries)
         } catch (_: Exception) {
             entries.clear()
-            preferences.edit().remove(KEY_ENTRIES).apply()
+            monthlyBudgetCents = null
+            storageUnavailable = true
         }
     }
 
-    private fun saveLocalData() {
+    private fun saveLocalData(): Boolean {
+        if (storageUnavailable) {
+            toast("Ledger storage is unavailable. Existing data was preserved.")
+            return false
+        }
         val array = JSONArray()
         entries.forEach { entry ->
-            array.put(
-                JSONObject().apply {
-                    put("id", entry.id)
-                    put("description", entry.description)
-                    put("amountCents", entry.amountCents)
-                    put("type", entry.type.name)
-                    put("category", entry.category)
-                    put("timestampMillis", entry.timestampMillis)
-                }
-            )
+            array.put(JSONObject().apply {
+                put("id", entry.id)
+                put("description", entry.description)
+                put("amountCents", entry.amountCents)
+                put("type", entry.type.name)
+                put("category", entry.category)
+                put("timestampMillis", entry.timestampMillis)
+            })
         }
-        preferences.edit().putString(KEY_ENTRIES, array.toString()).apply()
+        return try {
+            ledgerStore.save(LedgerStore.Snapshot(array.toString(), monthlyBudgetCents))
+            true
+        } catch (_: Exception) {
+            toast("Could not securely save the ledger. The previous saved copy remains intact.")
+            false
+        }
     }
 
     private fun sectionHeading(text: String) =
@@ -402,7 +425,5 @@ class MainActivity : Activity() {
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     companion object {
-        private const val KEY_ENTRIES = "ledger_entries"
-        private const val KEY_BUDGET = "monthly_budget_cents"
     }
 }
