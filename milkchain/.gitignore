@@ -1,6 +1,0 @@
-__pycache__/
-.venv/
-config.json
-data-*.json
-*-wallet.json
-*.tmp
