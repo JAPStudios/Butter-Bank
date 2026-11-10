@@ -117,7 +117,6 @@ class MutualTlsTransportTests(unittest.TestCase):
                 self.assertEqual(response.exception.code, 400)
             finally:
                 server.shutdown()
-                server.server_close()
                 thread.join(3)
                 signer.close()
 
