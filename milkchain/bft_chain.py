@@ -50,6 +50,12 @@ class BFTChain(Chain):
         # execution and structural checks; BFT certificates replace PoW.
         self.diff = 0
 
+    def check_tx(self, tx, bal, nonces):
+        """Milkchain does not charge users a network transaction fee."""
+        if isinstance(tx, dict) and "fee" in tx and tx["fee"] != 0:
+            return False, "Milkchain user transaction fees are disabled"
+        return super().check_tx(tx, bal, nonces)
+
     def save(self):
         """Atomically persist BFT chain state before signer finalization."""
         self.path.parent.mkdir(parents=True, exist_ok=True)

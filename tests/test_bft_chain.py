@@ -12,7 +12,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from admission import issuer_set_hash, sign_admission
 from bft_chain import BFTChain
-from node import bhash
+from node import bhash, signing_bytes
 from consensus import make_proposal, make_round_change, select_proposer
 from consensus_network import ConsensusHTTPServer
 from engine import ConsensusEngine
@@ -63,6 +63,54 @@ class BFTChainTests(unittest.TestCase):
             cfg = dict(self.cfg, block_reward=1)
             with self.assertRaisesRegex(ValueError, "supply and issuance rules"):
                 BFTChain(cfg, Path(directory) / "chain.json")
+
+    def test_bft_chain_rejects_user_transaction_fees(self):
+        with tempfile.TemporaryDirectory() as directory:
+            sender_key = Ed25519PrivateKey.generate()
+            recipient_key = Ed25519PrivateKey.generate()
+            sender = sender_key.public_key().public_bytes_raw().hex()
+            recipient = recipient_key.public_key().public_bytes_raw().hex()
+            cfg = dict(self.cfg, genesis_allocations={sender: 1000})
+            chain = BFTChain(cfg, Path(directory) / "fee-policy-chain.json")
+            transaction = {
+                "chain_id": self.chain_id,
+                "sender": sender,
+                "recipient": recipient,
+                "amount": 10,
+                "fee": 1,
+                "nonce": 1,
+            }
+            transaction["signature"] = sender_key.sign(signing_bytes(transaction)).hex()
+            accepted, message = chain.add_tx(transaction)
+            self.assertFalse(accepted)
+            self.assertIn("fees are disabled", message)
+            self.assertEqual(chain.pool, [])
+
+            transaction["fee"] = 0
+            transaction["signature"] = sender_key.sign(signing_bytes(transaction)).hex()
+            accepted, message = chain.add_tx(transaction)
+            self.assertTrue(accepted, message)
+            self.assertEqual(chain.pool, [transaction])
+
+            # Historical blocks containing a user-paid fee must also fail
+            # validation, even when their coinbase claims the fee.
+            invalid_block = {
+                "height": 1,
+                "previous_hash": chain.blocks[0]["hash"],
+                "timestamp": chain.blocks[0]["timestamp"],
+                "transactions": [
+                    {"type": "coinbase", "recipient": chain.validators[0]["public_key"], "amount": 1},
+                    dict(transaction, fee=1),
+                ],
+                "nonce": 0,
+            }
+            invalid_block["transactions"][1]["signature"] = sender_key.sign(
+                signing_bytes(invalid_block["transactions"][1])
+            ).hex()
+            invalid_block["hash"] = bhash(invalid_block)
+            self.assertFalse(
+                chain.valid_chain(chain.blocks + [invalid_block], require_certificates=False)
+            )
 
     def test_bft_chain_finalizes_and_persists_without_mining(self):
         with tempfile.TemporaryDirectory() as directory:
