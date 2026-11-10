@@ -736,6 +736,7 @@ class MainActivity : Activity() {
             toast("Enter a valid recipient address different from the sending wallet.")
             return
         }
+        val amountText = sendAmountInput.text.toString()
         sendButton.isEnabled = false
 
         networkExecutor.execute {
@@ -748,7 +749,7 @@ class MainActivity : Activity() {
                 }
                 val decimals = account.getInt("decimals")
                 if (decimals !in 0..18) throw IOException("The node returned unsupported Biscuits precision.")
-                val amount = TokenAmount.parsePositiveAtomicUnits(sendAmountInput.text.toString(), decimals)
+                val amount = TokenAmount.parsePositiveAtomicUnits(amountText, decimals)
                     ?: throw IllegalArgumentException("Enter a positive amount with no more than $decimals decimal places.")
                 val balance = BigInteger(account.get("balance").toString())
                 if (amount > balance) throw IllegalArgumentException("The account balance is insufficient.")
@@ -764,7 +765,7 @@ class MainActivity : Activity() {
                 }
 
                 val canonical = canonicalTransaction(chainId, sender, recipient, amount, nonce)
-                val signature = WalletStore(this).sign(canonical).toHex()
+                val signature = walletStore.sign(canonical).toHex()
                 val requestBody = String(canonical, StandardCharsets.UTF_8).dropLast(1) +
                     ",\"signature\":\"$signature\"}"
                 val response = postJson("$nodeUrl/tx", requestBody)
