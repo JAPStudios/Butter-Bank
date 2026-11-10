@@ -43,6 +43,23 @@ Do not use this prototype for real funds or expose its node API to the public in
 
 No component in this repository should be represented as a licensed bank, deposit-taking institution, production wallet, or audited payment network. Real banking and payment functionality requires defined product requirements, regulated-provider integrations where applicable, security engineering, and legal/compliance review.
 
+## Biscuits wallet key management
+
+New Milkchain wallets encrypt their Ed25519 private keys with AES-256-GCM. A key is derived from a passphrase using scrypt; the passphrase is never written to the wallet file. The wallet file is created with owner-only permissions (0600 on POSIX), and the tool refuses to overwrite an existing file. The transaction CLI prompts for the passphrase when it opens an encrypted wallet.
+
+```sh
+PYTHONPATH=milkchain python -m wallet create biscuits.wallet
+PYTHONPATH=milkchain python -m wallet address biscuits.wallet
+```
+
+Older wallet files contain an unencrypted private key. They remain readable for compatibility but emit a warning. Encrypt an existing legacy wallet in place with:
+
+```sh
+PYTHONPATH=milkchain python -m wallet encrypt old-wallet.json
+```
+
+Keep the passphrase separate from the wallet file. A forgotten passphrase cannot be recovered, and anyone who obtains both the wallet file and its passphrase can control its funds. This wallet format is development key storage, not a hardware wallet or audited custody system.
+
 ## Milkchain BFT node
 
 Copy `milkchain/config.example.json` to a private `config.bft.json` file, then configure the issuer public keys, admission certificates, validator key path, and peer addresses. The committed example deliberately contains issuer placeholders and no admission certificates, so it cannot start a validator as-is. Keep private keys and the completed configuration out of version control.
