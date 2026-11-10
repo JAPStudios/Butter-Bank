@@ -22,6 +22,24 @@ from engine import ConsensusEngine
 MAX_CONSENSUS_MESSAGE_BYTES = 1_000_000
 
 
+def normalize_peer_fingerprints(values):
+    """Normalize an explicit allowlist of SHA-256 peer-certificate fingerprints."""
+    if not isinstance(values, (list, tuple)) or not values:
+        return frozenset()
+    normalized = set()
+    for value in values:
+        if not isinstance(value, str) or len(value) != 64:
+            raise ValueError("each peer certificate fingerprint must be 64 hexadecimal characters")
+        try:
+            bytes.fromhex(value)
+        except ValueError as exc:
+            raise ValueError("peer certificate fingerprints must be hexadecimal") from exc
+        normalized.add(value.lower())
+    if len(normalized) != len(values):
+        raise ValueError("duplicate peer certificate fingerprints are not allowed")
+    return frozenset(normalized)
+
+
 def read_json_message(headers, stream):
     """Read one unambiguous, size-bounded JSON object from an HTTP request."""
     if headers.get_all("Transfer-Encoding", []):
@@ -72,7 +90,7 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
 
 
 class ConsensusHTTPServer:
-    def __init__(self, engine, peers=(), on_finalized=None, host="127.0.0.1", port=8334, tls_certfile=None, tls_keyfile=None):
+    def __init__(self, engine, peers=(), on_finalized=None, host="127.0.0.1", port=8334, tls_certfile=None, tls_keyfile=None, tls_ca_file=None, tls_client_certfile=None, tls_client_keyfile=None, tls_peer_fingerprints=()):
         if not isinstance(engine, ConsensusEngine):
             raise TypeError("engine must be a ConsensusEngine")
         self.engine = engine
@@ -92,6 +110,28 @@ class ConsensusHTTPServer:
             normalized_peer = peer.rstrip("/")
             if normalized_peer not in self.peers:
                 self.peers.append(normalized_peer)
+        tls_client_pair = bool(tls_client_certfile) and bool(tls_client_keyfile)
+        if bool(tls_client_certfile) != bool(tls_client_keyfile):
+            raise ValueError("both TLS client certificate and private key are required")
+        self.allowed_peer_fingerprints = normalize_peer_fingerprints(tls_peer_fingerprints)
+        remote_listener = host not in ("127.0.0.1", "localhost", "::1")
+        if remote_listener and not (
+            tls_certfile and tls_keyfile and tls_ca_file and tls_client_pair
+            and self.allowed_peer_fingerprints
+        ):
+            raise ValueError(
+                "non-loopback consensus listeners require mutual TLS, a trusted CA, "
+                "a client certificate, and an explicit peer certificate fingerprint allowlist"
+            )
+        if self.allowed_peer_fingerprints and not tls_ca_file:
+            raise ValueError("peer certificate fingerprints require a trusted TLS CA")
+        self.client_ssl_context = None
+        if tls_ca_file:
+            client_context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=tls_ca_file)
+            if tls_client_pair:
+                client_context.load_cert_chain(tls_client_certfile, tls_client_keyfile)
+            self.client_ssl_context = client_context
+
         self.on_finalized = on_finalized
         self.seen = set()
         self.seen_order = deque()
@@ -103,6 +143,13 @@ class ConsensusHTTPServer:
         class Handler(BaseHTTPRequestHandler):
             def setup(self):
                 super().setup()
+                # When mTLS is configured, require both a trusted chain and an
+                # explicitly allowlisted certificate fingerprint.
+                if outer.allowed_peer_fingerprints:
+                    peer_certificate = self.connection.getpeercert(binary_form=True)
+                    if not peer_certificate or hashlib.sha256(peer_certificate).hexdigest() not in outer.allowed_peer_fingerprints:
+                        self.connection.close()
+                        raise ssl.SSLError("consensus peer certificate is not allowlisted")
                 # Prevent slow clients from occupying every bounded worker.
                 self.connection.settimeout(10)
 
@@ -240,6 +287,9 @@ class ConsensusHTTPServer:
                 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
                 context.minimum_version = ssl.TLSVersion.TLSv1_2
                 context.load_cert_chain(tls_certfile, tls_keyfile)
+                if tls_ca_file:
+                    context.load_verify_locations(cafile=tls_ca_file)
+                    context.verify_mode = ssl.CERT_REQUIRED
                 self.server.socket = context.wrap_socket(self.server.socket, server_side=True)
             except Exception:
                 self.server.server_close()
@@ -311,7 +361,9 @@ class ConsensusHTTPServer:
                 headers={"Content-Type": "application/json"}, method="POST"
             )
             try:
-                with urllib.request.urlopen(request, timeout=3):
+                parsed_peer = urlparse(peer)
+                context = self.client_ssl_context if parsed_peer.scheme == "https" else None
+                with urllib.request.urlopen(request, timeout=3, context=context):
                     pass
             except Exception:
                 continue
