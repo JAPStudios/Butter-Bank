@@ -37,7 +37,7 @@ pip install -r milkchain/requirements.txt
 PYTHONPATH=milkchain python -m unittest discover -s tests -v
 ```
 
-Do not use this prototype for real funds or expose its node API to the public internet. The BFT implementation includes signed consensus messages, quorum certificates, bounded/rate-limited HTTP handlers, persistent signer locks, and certificate-validated chain extension. It is not production-ready: validator-set transitions and revocation activation, authenticated peer identity and operational peer allowlisting, cryptographic protection against signer-state rollback, robust multi-host partition/recovery testing, formal protocol review, and independent security audit remain outstanding. BFT-finalized history is intentionally not reorganized; a conflicting finalized history must be treated as a safety failure, not resolved by choosing a longer fork.
+Do not use this prototype for real funds or expose its node API to the public internet. The BFT implementation includes signed consensus messages, quorum certificates, bounded/rate-limited HTTP handlers, persistent signer locks, and certificate-validated chain extension. It is not production-ready: validator-set transitions and revocation activation, cryptographic protection against signer-state rollback, robust multi-host partition/recovery testing, formal protocol review, and independent security audit remain outstanding. Remote Milkchain consensus links now require mutual TLS with CA validation and an explicit peer-certificate fingerprint allowlist. BFT-finalized history is intentionally not reorganized; a conflicting finalized history must be treated as a safety failure, not resolved by choosing a longer fork.
 
 ## Security and scope
 
