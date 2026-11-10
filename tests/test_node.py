@@ -1,0 +1,586 @@
+import io
+import json
+import tempfile
+import threading
+import unittest
+import urllib.request
+from unittest.mock import patch
+from http.server import ThreadingHTTPServer
+from email.message import Message
+from pathlib import Path
+
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives import serialization
+
+from node import API, Chain, bhash, canon, signing_bytes, synchronize_peer, get, post
+
+
+def wallet():
+    key = Ed25519PrivateKey.generate()
+    private = key.private_bytes(
+        serialization.Encoding.Raw,
+        serialization.PrivateFormat.Raw,
+        serialization.NoEncryption(),
+    )
+    public = key.public_key().public_bytes(
+        serialization.Encoding.Raw,
+        serialization.PublicFormat.Raw,
+    )
+    return key, private.hex(), public.hex()
+
+
+class ChainValidationTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.path = Path(self.temp.name) / "chain.json"
+        self.cfg = {
+            "chain_id": "unit-test-chain",
+            "difficulty": 1,
+            "block_reward": 50,
+            "genesis_allocations": {},
+        }
+        self.chain = Chain(self.cfg, self.path)
+
+    def test_rejects_invalid_configuration(self):
+        for changes in (
+            {"difficulty": True},
+            {"difficulty": 0},
+            {"block_reward": -1},
+            {"genesis_allocations": {"not-a-key": 1}},
+        ):
+            cfg = dict(self.cfg)
+            cfg.update(changes)
+            with self.assertRaises(ValueError):
+                Chain(cfg, Path(self.temp.name) / ("bad-" + str(len(changes)) + ".json"))
+
+    def test_mined_block_validates_and_persists(self):
+        _, _, address = wallet()
+        block, message = self.chain.mine(address)
+        self.assertEqual(message, "mined")
+        self.assertTrue(self.chain.valid_chain(self.chain.blocks))
+        restored = Chain(self.cfg, self.path)
+        self.assertEqual(restored.blocks, self.chain.blocks)
+        self.assertEqual(restored.state()[0][address], 50)
+
+    def test_rejects_tampered_block_and_non_integer_timestamp(self):
+        _, _, address = wallet()
+        self.chain.mine(address)
+        tampered = [dict(b) for b in self.chain.blocks]
+        tampered[1]["timestamp"] = str(tampered[1]["timestamp"])
+        self.assertFalse(self.chain.valid_chain(tampered))
+        tampered = [dict(b) for b in self.chain.blocks]
+        tampered[1]["transactions"] = []
+        self.assertFalse(self.chain.valid_chain(tampered))
+
+    def test_signed_transaction_and_pool_survive_restart(self):
+        key, _, sender = wallet()
+        _, _, recipient = wallet()
+        self.cfg["genesis_allocations"] = {sender: 1000}
+        self.path = Path(self.temp.name) / "funded-chain.json"
+        self.chain = Chain(self.cfg, self.path)
+        tx = {
+            "chain_id": self.cfg["chain_id"],
+            "sender": sender,
+            "recipient": recipient,
+            "amount": 100,
+            "fee": 2,
+            "nonce": 1,
+        }
+        tx["signature"] = key.sign(signing_bytes(tx)).hex()
+        ok, message = self.chain.add_tx(tx)
+        self.assertTrue(ok, message)
+        restored = Chain(self.cfg, self.path)
+        self.assertEqual(restored.pool, [tx])
+
+    def test_configured_peers_persist_across_restart(self):
+        self.cfg["peers"] = ["http://127.0.0.1:8334"]
+        self.chain = Chain(self.cfg, self.path)
+        restored = Chain(self.cfg, self.path)
+        self.assertEqual(restored.peers, ["http://127.0.0.1:8334"])
+
+    def test_rejects_malformed_peer_configuration(self):
+        cfg = dict(self.cfg)
+        cfg["peers"] = "http://127.0.0.1:8333"
+        with self.assertRaises(ValueError):
+            Chain(cfg, Path(self.temp.name) / "bad-peers.json")
+
+    def test_block_cannot_spend_its_own_coinbase_reward(self):
+        miner_key, _, miner = wallet()
+        _, _, recipient = wallet()
+        tx = {
+            "chain_id": self.cfg["chain_id"],
+            "sender": miner,
+            "recipient": recipient,
+            "amount": 50,
+            "fee": 0,
+            "nonce": 1,
+        }
+        tx["signature"] = miner_key.sign(signing_bytes(tx)).hex()
+        block = {
+            "height": 1,
+            "previous_hash": self.chain.blocks[0]["hash"],
+            "timestamp": 1,
+            "transactions": [
+                {"type": "coinbase", "recipient": miner, "amount": 50},
+                tx,
+            ],
+            "nonce": 0,
+        }
+        while True:
+            block["hash"] = bhash(block)
+            if block["hash"].startswith("0" * self.cfg["difficulty"]):
+                break
+            block["nonce"] += 1
+
+        # The miner has no funds before this block. Its reward must not be
+        # spendable by a transaction included in the same block.
+        self.assertFalse(self.chain.valid_chain([self.chain.blocks[0], block]))
+
+    def test_sync_revalidates_pending_transactions(self):
+        _, _, miner = wallet()
+        self.chain.mine(miner)
+        candidate = list(self.chain.blocks)
+        _, _, second_miner = wallet()
+        remote = Chain(self.cfg, Path(self.temp.name) / "remote.json")
+        remote.mine(second_miner)
+        remote.mine(second_miner)
+        self.assertTrue(self.chain.replace(remote.blocks)[0])
+        self.assertEqual(len(self.chain.blocks), 3)
+
+
+
+    def test_chain_work_uses_proof_of_work_target(self):
+        from node import block_work, chain_work
+
+        self.assertEqual(block_work(1), 16)
+        self.assertEqual(block_work(2), 256)
+        _, _, miner = wallet()
+        self.chain.mine(miner)
+        self.assertEqual(chain_work(self.chain.blocks, self.chain.diff), 16)
+
+    def test_reorganization_returns_orphaned_transactions_to_mempool(self):
+        sender_key, _, sender = wallet()
+        _, _, recipient = wallet()
+        self.cfg["genesis_allocations"] = {sender: 1000}
+        self.path = Path(self.temp.name) / "reorg-local.json"
+        self.chain = Chain(self.cfg, self.path)
+        tx = {
+            "chain_id": self.cfg["chain_id"],
+            "sender": sender,
+            "recipient": recipient,
+            "amount": 125,
+            "fee": 3,
+            "nonce": 1,
+        }
+        tx["signature"] = sender_key.sign(signing_bytes(tx)).hex()
+        self.assertTrue(self.chain.add_tx(tx)[0])
+        local_block, message = self.chain.mine(sender)
+        self.assertEqual(message, "mined")
+        self.assertIn(tx, local_block["transactions"])
+
+        remote = Chain(self.cfg, Path(self.temp.name) / "reorg-remote.json")
+        _, _, remote_miner = wallet()
+        remote.mine(remote_miner)
+        remote.mine(remote_miner)
+        self.assertTrue(self.chain.replace(remote.blocks)[0])
+        self.assertEqual(self.chain.blocks, remote.blocks)
+        self.assertIn(tx, self.chain.pool)
+        balances, nonces = self.chain.state()
+        self.assertEqual(balances[sender], 1000)
+        self.assertEqual(nonces[sender], 0)
+
+    def test_peer_sync_fetches_and_adopts_longer_chain(self):
+        _, _, miner = wallet()
+        remote = Chain(self.cfg, Path(self.temp.name) / "remote-periodic.json")
+        remote.mine(miner)
+        API.chain = remote
+        API.peers = []
+        server = ThreadingHTTPServer(("127.0.0.1", 0), API)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.shutdown)
+        self.addCleanup(server.server_close)
+        self.addCleanup(thread.join, 2)
+
+        peer = f"http://127.0.0.1:{server.server_port}"
+        self.assertTrue(synchronize_peer(self.chain, peer))
+        self.assertEqual(self.chain.blocks, remote.blocks)
+
+    def test_peer_sync_rejects_different_network(self):
+        other_cfg = dict(self.cfg, chain_id="different-chain")
+        remote = Chain(other_cfg, Path(self.temp.name) / "other-network.json")
+        API.chain = remote
+        API.peers = []
+        server = ThreadingHTTPServer(("127.0.0.1", 0), API)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.shutdown)
+        self.addCleanup(server.server_close)
+        self.addCleanup(thread.join, 2)
+
+        peer = f"http://127.0.0.1:{server.server_port}"
+        self.assertFalse(synchronize_peer(self.chain, peer))
+        self.assertEqual(len(self.chain.blocks), 1)
+
+    def test_receive_chain_endpoint_synchronizes_a_longer_fork(self):
+        _, _, first_miner = wallet()
+        _, _, second_miner = wallet()
+        remote = Chain(self.cfg, Path(self.temp.name) / "remote-sync.json")
+        remote.mine(first_miner)
+        remote.mine(second_miner)
+
+        API.chain = self.chain
+        API.peers = []
+        server = ThreadingHTTPServer(("127.0.0.1", 0), API)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(thread.join, 2)
+        self.addCleanup(server.shutdown)
+
+        payload = json.dumps({"chain": remote.blocks}).encode()
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_port}/receive-chain",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=3) as response:
+            result = json.loads(response.read())
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(self.chain.blocks, remote.blocks)
+
+
+class RequestBodyValidationTests(unittest.TestCase):
+    def make_handler(self, body, *lengths, transfer_encoding=None):
+        handler = API.__new__(API)
+        handler.headers = Message()
+        for length in lengths:
+            handler.headers.add_header('Content-Length', length)
+        if transfer_encoding is not None:
+            handler.headers.add_header('Transfer-Encoding', transfer_encoding)
+        handler.rfile = io.BytesIO(body)
+        return handler
+
+    def test_accepts_complete_json_object(self):
+        body = b'{"transaction":{}}'
+        self.assertEqual(self.make_handler(body, str(len(body))).body(),
+                         {'transaction': {}})
+
+    def test_rejects_missing_or_duplicate_content_length(self):
+        for lengths in ((), ('2', '2')):
+            with self.subTest(lengths=lengths):
+                with self.assertRaisesRegex(ValueError, 'exactly one Content-Length'):
+                    self.make_handler(b'{}', *lengths).body()
+
+    def test_rejects_transfer_encoding(self):
+        with self.assertRaisesRegex(ValueError, 'Transfer-Encoding'):
+            self.make_handler(b'{}', '2', transfer_encoding='chunked').body()
+
+    def test_rejects_non_decimal_and_out_of_range_lengths(self):
+        for length in ('+2', ' 2', '2, 2', '٢', '0', '1000001'):
+            with self.subTest(length=length):
+                with self.assertRaises(ValueError):
+                    self.make_handler(b'{}', length).body()
+
+    def test_rejects_truncated_body_and_non_object_json(self):
+        with self.assertRaisesRegex(ValueError, 'incomplete request body'):
+            self.make_handler(b'{}', '3').body()
+        with self.assertRaisesRegex(ValueError, 'JSON request body must be an object'):
+            self.make_handler(b'[]', '2').body()
+
+class BoundedPeerResponseTests(unittest.TestCase):
+    class Response(io.BytesIO):
+        def __init__(self, body, headers=None):
+            super().__init__(body)
+            self.headers = headers or Message()
+        def __enter__(self): return self
+        def __exit__(self, *args): self.close()
+
+    def test_reads_json_within_limit(self):
+        headers = Message()
+        headers.add_header('Content-Length', '8')
+        with patch('node.urllib.request.urlopen', return_value=self.Response(b'{"ok":1}', headers)):
+            self.assertEqual(get('https://peer.test/status', max_bytes=8), {'ok': 1})
+
+    def test_rejects_oversized_declared_or_actual_response(self):
+        headers = Message()
+        headers.add_header('Content-Length', '9')
+        with patch('node.urllib.request.urlopen', return_value=self.Response(b'{"ok":1}', headers)):
+            with self.assertRaisesRegex(ValueError, 'exceeds size limit'):
+                get('https://peer.test/status', max_bytes=8)
+        with patch('node.urllib.request.urlopen', return_value=self.Response(b'{"ok":1}')):
+            with self.assertRaisesRegex(ValueError, 'exceeds size limit'):
+                get('https://peer.test/status', max_bytes=7)
+
+    def test_post_reads_json_within_limit(self):
+        headers = Message()
+        headers.add_header('Content-Length', '8')
+        with patch('node.urllib.request.urlopen', return_value=self.Response(b'{"ok":1}', headers)):
+            self.assertEqual(post('https://peer.test/tx', {'tx': 1}, max_bytes=8), {'ok': 1})
+
+    def test_post_rejects_oversized_and_truncated_responses(self):
+        headers = Message()
+        headers.add_header('Content-Length', '9')
+        with patch('node.urllib.request.urlopen', return_value=self.Response(b'{"ok":1}', headers)):
+            with self.assertRaisesRegex(ValueError, 'exceeds size limit'):
+                post('https://peer.test/tx', {'tx': 1}, max_bytes=8)
+        headers = Message()
+        headers.add_header('Content-Length', '9')
+        with patch('node.urllib.request.urlopen', return_value=self.Response(b'{"ok":1}', headers)):
+            with self.assertRaisesRegex(ValueError, 'incomplete peer response'):
+                post('https://peer.test/tx', {'tx': 1}, max_bytes=10)
+
+    def test_rejects_duplicate_length_and_truncated_response(self):
+        headers = Message()
+        headers.add_header('Content-Length', '7')
+        headers.add_header('Content-Length', '7')
+        with patch('node.urllib.request.urlopen', return_value=self.Response(b'{"ok":1}', headers)):
+            with self.assertRaisesRegex(ValueError, 'duplicate response Content-Length'):
+                get('https://peer.test/status')
+        headers = Message()
+        headers.add_header('Content-Length', '9')
+        with patch('node.urllib.request.urlopen', return_value=self.Response(b'{"ok":1}', headers)):
+            with self.assertRaisesRegex(ValueError, 'incomplete peer response'):
+                get('https://peer.test/status')
+
+
+class ChainPaginationTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.cfg = {
+            "chain_id": "pagination-test-chain",
+            "difficulty": 1,
+            "block_reward": 50,
+            "genesis_allocations": {},
+        }
+        self.chain = Chain(self.cfg, Path(self.temp.name) / "chain.json")
+
+    def test_peer_chain_is_fetched_in_pages(self):
+        from node import fetch_peer_chain
+        blocks = [self.chain.genesis_block()]
+        status = {"height": 0}
+        with patch("node.get", return_value={"start": 0, "chain": blocks}) as request:
+            self.assertEqual(fetch_peer_chain("https://peer.test", status), blocks)
+            request.assert_called_once_with("https://peer.test/chain?start=0&limit=1")
+
+    def test_peer_chain_rejects_inconsistent_page(self):
+        from node import fetch_peer_chain
+        with patch("node.get", return_value={"start": 1, "chain": [self.chain.genesis_block()]}):
+            with self.assertRaisesRegex(ValueError, "invalid chain page"):
+                fetch_peer_chain("https://peer.test", {"height": 0})
+
+    def test_peer_chain_rejects_invalid_height(self):
+        from node import fetch_peer_chain
+        for height in (True, -1, "1"):
+            with self.subTest(height=height):
+                with self.assertRaisesRegex(ValueError, "invalid chain height"):
+                    fetch_peer_chain("https://peer.test", {"height": height})
+
+
+class AccountQueryApiTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.sender_key, _, self.sender = wallet()
+        self.recipient_key, _, self.recipient = wallet()
+        self.miner_key, _, self.miner = wallet()
+        cfg = {
+            "chain_id": "account-query-test",
+            "difficulty": 1,
+            "block_reward": 50,
+            "genesis_allocations": {self.sender: 1000},
+            "symbol": "Biscuits",
+            "decimals": 8,
+        }
+        self.chain = Chain(cfg, Path(self.temp.name) / "account-query-chain.json")
+        tx = {
+            "chain_id": self.chain.id,
+            "sender": self.sender,
+            "recipient": self.recipient,
+            "amount": 250,
+            "fee": 2,
+            "nonce": 1,
+        }
+        tx["signature"] = self.sender_key.sign(signing_bytes(tx)).hex()
+        self.assertEqual(self.chain.add_tx(tx), (True, "accepted"))
+        self.chain.mine(self.miner)
+
+        API.chain = self.chain
+        API.peers = []
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), API)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        def stop_server():
+            self.server.shutdown()
+            self.server.server_close()
+            self.thread.join(2)
+        self.addCleanup(stop_server)
+        self.base_url = f"http://127.0.0.1:{self.server.server_port}"
+
+    def test_balance_endpoint_returns_one_account_and_atomic_units(self):
+        sender = get(f"{self.base_url}/balance?address={self.sender}")
+        recipient = get(f"{self.base_url}/balance?address={self.recipient}")
+        miner = get(f"{self.base_url}/balance?address={self.miner}")
+        self.assertEqual(sender["balance"], 748)
+        self.assertEqual(sender["nonce"], 1)
+        self.assertEqual(recipient["balance"], 250)
+        self.assertEqual(miner["balance"], 52)
+        self.assertEqual(sender["symbol"], "Biscuits")
+        self.assertEqual(sender["decimals"], 8)
+
+    def test_history_endpoint_returns_newest_first_paginated_activity(self):
+        sender_history = get(f"{self.base_url}/history?address={self.sender}&limit=10")
+        self.assertEqual(sender_history["total"], 2)
+        self.assertEqual(sender_history["history"][0]["direction"], "sent")
+        self.assertEqual(sender_history["history"][0]["amount"], 250)
+        self.assertEqual(sender_history["history"][0]["fee"], 2)
+        self.assertEqual(sender_history["history"][1]["type"], "genesis")
+
+        recipient_history = get(f"{self.base_url}/history?address={self.recipient}")
+        self.assertEqual(recipient_history["total"], 1)
+        self.assertEqual(recipient_history["history"][0]["direction"], "received")
+
+        miner_history = get(f"{self.base_url}/history?address={self.miner}")
+        self.assertEqual(miner_history["history"][0]["type"], "coinbase")
+        self.assertEqual(miner_history["history"][0]["amount"], 52)
+
+        first_page = get(f"{self.base_url}/history?address={self.sender}&start=0&limit=1")
+        second_page = get(f"{self.base_url}/history?address={self.sender}&start=1&limit=1")
+        self.assertEqual(len(first_page["history"]), 1)
+        self.assertEqual(len(second_page["history"]), 1)
+        self.assertNotEqual(
+            first_page["history"][0]["transaction_index"],
+            second_page["history"][0]["transaction_index"],
+        )
+
+    def test_mempool_endpoint_can_filter_pending_transactions_by_sender(self):
+        _, _, second_recipient = wallet()
+        tx = {
+            "chain_id": self.chain.id,
+            "sender": self.sender,
+            "recipient": second_recipient,
+            "amount": 10,
+            "fee": 1,
+            "nonce": 2,
+        }
+        tx["signature"] = self.sender_key.sign(signing_bytes(tx)).hex()
+        self.assertEqual(self.chain.add_tx(tx), (True, "accepted"))
+
+        sender_pool = get(f"{self.base_url}/mempool?address={self.sender}")
+        recipient_pool = get(f"{self.base_url}/mempool?address={self.recipient}")
+        all_pool = get(f"{self.base_url}/mempool")
+        self.assertEqual(sender_pool["transactions"], [tx])
+        self.assertEqual(recipient_pool["transactions"], [])
+        self.assertEqual(all_pool["transactions"], [tx])
+
+        with self.assertRaises(Exception):
+            get(f"{self.base_url}/mempool?address=invalid")
+
+    def test_account_query_endpoints_reject_invalid_addresses_and_page_sizes(self):
+        for path in (
+            "/balance?address=not-an-address",
+            "/balance",
+            f"/history?address={self.sender}&limit=101",
+            f"/history?address={self.sender}&start=-1",
+            f"/history?address={self.sender}&limit=abc",
+        ):
+            with self.subTest(path=path), self.assertRaises(Exception):
+                get(f"{self.base_url}{path}")
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class MempoolBoundTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.path = Path(self.temp.name) / "bounded-mempool.json"
+        self.key, _, self.sender = wallet()
+        _, _, self.recipient = wallet()
+        self.cfg = {
+            "chain_id": "mempool-bound-test",
+            "difficulty": 1,
+            "block_reward": 0,
+            "genesis_allocations": {self.sender: 100000},
+        }
+        self.chain = Chain(self.cfg, self.path)
+
+    def make_tx(self, nonce=1, **extra):
+        tx = {
+            "chain_id": self.cfg["chain_id"],
+            "sender": self.sender,
+            "recipient": self.recipient,
+            "amount": 1,
+            "fee": 0,
+            "nonce": nonce,
+        }
+        tx.update(extra)
+        tx["signature"] = self.key.sign(signing_bytes(tx)).hex()
+        return tx
+
+    def test_rejects_non_object_transaction_without_exception(self):
+        self.assertEqual(self.chain.add_tx([]), (False, "transaction must be a JSON object"))
+        self.assertEqual(self.chain.add_tx(None), (False, "transaction must be a JSON object"))
+
+    def test_rejects_transaction_over_serialized_size_limit(self):
+        tx = self.make_tx()
+        tx["chain_id"] = "x" * 5000
+        self.assertEqual(
+            self.chain.add_tx(tx),
+            (False, "transaction exceeds serialized size limit"),
+        )
+
+    def test_mempool_has_a_hard_transaction_count_limit(self):
+        with patch("node.MAX_MEMPOOL_TXS", 1):
+            self.assertEqual(self.chain.add_tx(self.make_tx(1)), (True, "accepted"))
+            self.assertEqual(self.chain.add_tx(self.make_tx(2)), (False, "mempool is full"))
+
+    def test_restart_rejects_persisted_mempool_over_limit(self):
+        self.chain.pool = [self.make_tx(1), self.make_tx(2)]
+        self.chain.save()
+        with patch("node.MAX_MEMPOOL_TXS", 1):
+            with self.assertRaisesRegex(ValueError, "mempool limit"):
+                Chain(self.cfg, self.path)
+
+class RevalidationMempoolBoundTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.key, _, self.sender = wallet()
+        _, _, self.recipient = wallet()
+        self.cfg = {
+            "chain_id": "revalidation-mempool-bound-test",
+            "difficulty": 1,
+            "block_reward": 0,
+            "genesis_allocations": {self.sender: 2000},
+        }
+        self.chain = Chain(self.cfg, Path(self.temp.name) / "chain.json")
+
+    def test_revalidation_never_rebuilds_pool_over_limit(self):
+        transactions = []
+        for nonce in range(1, 902):
+            tx = {
+                "chain_id": self.cfg["chain_id"],
+                "sender": self.sender,
+                "recipient": self.recipient,
+                "amount": 1,
+                "fee": 0,
+                "nonce": nonce,
+            }
+            tx["signature"] = self.key.sign(signing_bytes(tx)).hex()
+            transactions.append(tx)
+
+        self.chain.pool = transactions
+        self.chain._revalidate_pool()
+
+        self.assertEqual(len(self.chain.pool), 900)
+        self.assertEqual(
+            [tx["nonce"] for tx in self.chain.pool],
+            list(range(1, 901)),
+        )
+
