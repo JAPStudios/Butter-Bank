@@ -8,6 +8,10 @@ from urllib.parse import urlparse
 from node import Chain, bhash, canon, sha, MAX_TXS
 from consensus import verify_commit_certificate, verify_prevote_certificate, validator_set_hash, select_proposer
 from admission import validator_set_from_certificates
+from validator_transitions import (
+    verify_transition_certificate, verify_transition_history,
+    validator_set_at_height,
+)
 
 
 class BFTChain(Chain):
@@ -31,7 +35,9 @@ class BFTChain(Chain):
             cfg.get("chain_id", ""),
             cfg.get("admission_epoch"),
         )
+        self.initial_validators = [dict(item) for item in self.validators]
         self.validators_hash = validator_set_hash(self.validators)
+        self.validator_transitions = []
         self.consensus_mode = "bft"
         super().__init__(cfg, path)
         for peer in self.peers:
@@ -49,6 +55,32 @@ class BFTChain(Chain):
         # The inherited proof-of-work validator is reused only for transaction
         # execution and structural checks; BFT certificates replace PoW.
         self.diff = 0
+        self._refresh_active_validator_set()
+
+    def _refresh_active_validator_set(self):
+        """Select the set authorized for the next block from finalized history."""
+        transitions = self._transition_history(self.blocks)
+        self.validator_transitions = transitions
+        self.validators = validator_set_at_height(
+            transitions, self.initial_validators, self.id, len(self.blocks)
+        )
+        self.validators_hash = validator_set_hash(self.validators)
+
+    def _transition_history(self, blocks):
+        """Extract committed transition certificates in block order."""
+        transitions = []
+        for height, block in enumerate(blocks[1:], 1):
+            certificate = block.get("validator_transition")
+            if certificate is None:
+                continue
+            if not isinstance(certificate, dict):
+                raise ValueError("validator transition must be a certificate object")
+            if certificate.get("activation_height", 0) <= height:
+                raise ValueError("validator transition must activate after its inclusion block")
+            transitions.append(certificate)
+        if not verify_transition_history(transitions, self.initial_validators, self.id):
+            raise ValueError("committed validator transition history is invalid")
+        return transitions
 
     def check_tx(self, tx, bal, nonces):
         """Milkchain does not charge users a network transaction fee."""
@@ -90,7 +122,7 @@ class BFTChain(Chain):
                 pass
             raise
 
-    def _verify_recovery_metadata(self, block, height, commit_round):
+    def _verify_recovery_metadata(self, block, height, commit_round, validators):
         fields = {"valid_round", "valid_round_certificate"}
         present = fields & set(block)
         if not present:
@@ -103,7 +135,7 @@ class BFTChain(Chain):
             and not isinstance(valid_round, bool)
             and 0 <= valid_round < commit_round
             and verify_prevote_certificate(
-                block["valid_round_certificate"], self.validators, self.id,
+                block["valid_round_certificate"], validators, self.id,
                 height, valid_round, block["hash"],
             )
         )
@@ -118,6 +150,8 @@ class BFTChain(Chain):
             }
             bft_fields = {"commit_round", "commit_certificate"}
             recovery_fields = {"valid_round", "valid_round_certificate"}
+            transition_fields = {"validator_transition"}
+            transitions = []
             for index, block in enumerate(blocks):
                 if index == 0:
                     cleaned.append(block)
@@ -126,7 +160,11 @@ class BFTChain(Chain):
                     return False
                 has_certificate = bft_fields <= set(block)
                 has_recovery = recovery_fields <= set(block)
-                if (set(block) - base_fields - bft_fields - recovery_fields
+                has_transition = "validator_transition" in block
+                active_validators = validator_set_at_height(
+                    transitions, self.initial_validators, self.id, index
+                )
+                if (set(block) - base_fields - bft_fields - recovery_fields - transition_fields
                         or bool(recovery_fields & set(block)) != has_recovery
                         or bool(bft_fields & set(block)) != has_certificate):
                     return False
@@ -148,7 +186,7 @@ class BFTChain(Chain):
                             or round_number < 0):
                         return False
                     if not verify_commit_certificate(
-                        block["commit_certificate"], self.validators, self.id,
+                        block["commit_certificate"], active_validators, self.id,
                         index, round_number, block["hash"],
                     ):
                         return False
@@ -158,9 +196,24 @@ class BFTChain(Chain):
                             or not block["transactions"]
                             or not isinstance(block["transactions"][0], dict)
                             or block["transactions"][0].get("recipient")
-                            != select_proposer(self.validators, index, round_number)):
+                            != select_proposer(active_validators, index, round_number)):
                         return False
-                    if not self._verify_recovery_metadata(block, index, round_number):
+                    if not self._verify_recovery_metadata(
+                        block, index, round_number, active_validators
+                    ):
+                        return False
+                if has_transition:
+                    certificate = block["validator_transition"]
+                    if (not isinstance(certificate, dict)
+                            or certificate.get("activation_height", 0) <= index
+                            or not verify_transition_certificate(
+                                certificate, active_validators, self.id
+                            )):
+                        return False
+                    transitions.append(certificate)
+                    if not verify_transition_history(
+                        transitions, self.initial_validators, self.id
+                    ):
                         return False
                 cleaned.append({key: block[key] for key in base_fields})
             old_diff = self.diff
@@ -181,7 +234,7 @@ class BFTChain(Chain):
                 return None
             return bhash(block)
 
-    def build_proposal(self, proposer, round_number=0):
+    def build_proposal(self, proposer, round_number=0, validator_transition=None):
         """Build a candidate for the deterministic proposer of this height/round."""
         expected = select_proposer(self.validators, len(self.blocks), round_number)
         if proposer != expected:
@@ -210,6 +263,8 @@ class BFTChain(Chain):
                                  "amount": self.reward + fees}] + chosen,
                 "nonce": 0,
             }
+            if validator_transition is not None:
+                block["validator_transition"] = validator_transition
             block["hash"] = bhash(block)
             return block
 
@@ -245,9 +300,11 @@ class BFTChain(Chain):
             try:
                 self._revalidate_pool()
                 self.save()
+                self._refresh_active_validator_set()
             except Exception:
                 self.blocks = previous_blocks
                 self.pool = previous_pool
+                self._refresh_active_validator_set()
                 raise
             return True, "BFT block finalized"
 
@@ -268,8 +325,10 @@ class BFTChain(Chain):
             try:
                 self._revalidate_pool()
                 self.save()
+                self._refresh_active_validator_set()
             except Exception:
                 self.blocks = previous_blocks
                 self.pool = previous_pool
+                self._refresh_active_validator_set()
                 raise
             return True, "BFT chain extended"
