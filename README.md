@@ -39,11 +39,11 @@ pip install -r milkchain/requirements.txt
 PYTHONPATH=milkchain python -m unittest discover -s tests -v
 ```
 
-Do not use this prototype for real funds or expose its node API to the public internet. The BFT implementation includes signed consensus messages, quorum certificates, bounded/rate-limited HTTP handlers, persistent signer locks, and certificate-validated chain extension. It is not production-ready: validator-set transitions and revocation activation, cryptographic protection against signer-state rollback, robust multi-host partition/recovery testing, formal protocol review, and independent security audit remain outstanding. Remote Milkchain consensus links now require mutual TLS with CA validation and an explicit peer-certificate fingerprint allowlist. BFT-finalized history is intentionally not reorganized; a conflicting finalized history must be treated as a safety failure, not resolved by choosing a longer fork.
+Do not use this prototype for real funds or expose its node API to the public internet. The BFT software includes signed consensus messages, quorum certificates, bounded/rate-limited HTTP handlers, persistent signer locks, certificate-validated chain extension, chain-committed validator-set transitions, historical validator-set verification, live signer rotation, and observer operation for removed validators. It is not production-ready: cryptographic protection against signer-state rollback, robust multi-host partition/recovery testing, formal protocol review, and independent security audit remain outstanding. Remote Milkchain consensus links now require mutual TLS with CA validation and an explicit peer-certificate fingerprint allowlist. BFT-finalized history is intentionally not reorganized; a conflicting finalized history must be treated as a safety failure, not resolved by choosing a longer fork.
 
 ## Security and scope
 
-The software currently in this repository does not yet implement deposit custody, external payment-rail settlement, credit issuance, or payroll integrations. The Android account viewer is read-only, and Milkchain remains a development implementation. Production deployment requires further security engineering, independent review, and the necessary provider integrations.
+The software currently in this repository does not yet provide deposit custody, external payment-rail settlement, credit issuance, or payroll integrations. The account viewer is read-only, and Milkchain remains development software. Production deployment requires further security engineering, independent review, and the necessary provider integrations.
 
 ## Biscuits wallet key management
 
@@ -80,4 +80,4 @@ The account API exposes `GET /balance?address=PUBLIC_KEY` for one account balanc
 
 The BFT node requires more than two-thirds of validator voting power to finalize a block. The current development configuration does not mint new Biscuits through block rewards, and BFT transactions cannot charge users a network fee. Monetary issuance rules are intentionally unspecified; no supply cap or issuance schedule is assumed. Read [the consensus and validator operations specification](milkchain/docs/BFT_CONSENSUS.md) before configuring validators.
 
-This is development software, not a production network. Validator-set transitions and revocation activation, anti-rollback signer storage, formal protocol review, independent security audit, adversarial network testing, and production recovery procedures remain necessary.
+This is development software, not a production network. Anti-rollback signer storage, formal protocol review, independent security audit, adversarial network testing, and production recovery procedures remain necessary. Validator-set transitions are committed to finalized blocks, activated at their declared heights, and reflected in each node's signer state.
