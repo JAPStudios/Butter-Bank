@@ -2,7 +2,7 @@ import io
 import unittest
 from email.message import Message
 
-from tx import read_limited_response, validate_node_url
+from tx import next_account_nonce, read_limited_response, validate_node_url
 
 
 class WalletNodeUrlTests(unittest.TestCase):
@@ -21,6 +21,32 @@ class WalletNodeUrlTests(unittest.TestCase):
         ):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 validate_node_url(value)
+
+
+class AccountNonceSelectionTests(unittest.TestCase):
+    def test_uses_confirmed_nonce_and_highest_pending_outgoing_nonce(self):
+        account = {"address": "ab" * 32, "nonce": 5}
+        mempool = {"transactions": [
+            {"sender": "ab" * 32, "nonce": 6},
+            {"sender": "cd" * 32, "nonce": 90},
+            {"sender": "ab" * 32, "nonce": 8},
+        ]}
+        self.assertEqual(next_account_nonce(account, mempool, "ab" * 32), 9)
+
+    def test_rejects_invalid_account_or_pending_nonce_data(self):
+        public = "ab" * 32
+        with self.assertRaises(ValueError):
+            next_account_nonce({"address": "cd" * 32, "nonce": 0}, {"transactions": []}, public)
+        with self.assertRaises(ValueError):
+            next_account_nonce({"address": public, "nonce": True}, {"transactions": []}, public)
+        with self.assertRaises(ValueError):
+            next_account_nonce({"address": public, "nonce": 0}, {"transactions": "invalid"}, public)
+        with self.assertRaises(ValueError):
+            next_account_nonce(
+                {"address": public, "nonce": 0},
+                {"transactions": [{"sender": public, "nonce": True}]},
+                public,
+            )
 
 
 class BoundedNodeResponseTests(unittest.TestCase):
