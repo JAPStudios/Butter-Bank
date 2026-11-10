@@ -23,6 +23,7 @@ class MoneyTest {
         assertNull(TokenAmount.parsePositiveAtomicUnits("0", 8))
         assertNull(TokenAmount.parsePositiveAtomicUnits("not-a-number", 8))
         assertEquals(java.math.BigInteger("125"), TokenAmount.parsePositiveAtomicUnits("1,25", 2, java.util.Locale.GERMANY))
+        assertNull(TokenAmount.parsePositiveAtomicUnits("1.234", 2, java.util.Locale.GERMANY))
     }
 
     @Test(expected = IllegalArgumentException::class)
