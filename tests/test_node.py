@@ -413,9 +413,11 @@ class AccountQueryApiTests(unittest.TestCase):
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), API)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
-        self.addCleanup(self.server.shutdown)
-        self.addCleanup(self.server.server_close)
-        self.addCleanup(self.thread.join, 2)
+        def stop_server():
+            self.server.shutdown()
+            self.server.server_close()
+            self.thread.join(2)
+        self.addCleanup(stop_server)
         self.base_url = f"http://127.0.0.1:{self.server.server_port}"
 
     def test_balance_endpoint_returns_one_account_and_atomic_units(self):
