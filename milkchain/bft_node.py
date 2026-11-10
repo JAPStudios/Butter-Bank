@@ -34,8 +34,11 @@ class BFTAPI(API):
             return super().do_POST()
         try:
             request = self.body()
-            if set(request) - {"block", "valid_round", "valid_round_certificate"}:
-                raise ValueError("proposal request accepts only block and valid-round proof fields")
+            if set(request) - {
+                "block", "valid_round", "valid_round_certificate",
+                "validator_transition",
+            }:
+                raise ValueError("proposal request contains unsupported fields")
             chain = self.chain
             key = self.consensus_key
             signer = self.consensus_server.engine.signer
@@ -48,7 +51,10 @@ class BFTAPI(API):
                 return
             block = request.get("block")
             if block is None:
-                block = chain.build_proposal(proposer, self.consensus_server.engine.round)
+                block = chain.build_proposal(
+                    proposer, self.consensus_server.engine.round,
+                    request.get("validator_transition"),
+                )
             elif not isinstance(block, dict) or chain.validate_proposal_block(block) is None:
                 raise ValueError("supplied proposal block is invalid for the current finalized chain")
             proposal = make_proposal(
