@@ -45,7 +45,7 @@ No component in this repository should be represented as a licensed bank, deposi
 
 ## Biscuits wallet key management
 
-New Milkchain wallets encrypt their Ed25519 private keys with AES-256-GCM. A key is derived from a passphrase using scrypt; the passphrase is never written to the wallet file. The wallet file is created with owner-only permissions (0600 on POSIX), and the tool refuses to overwrite an existing file. The transaction CLI prompts for the passphrase when it opens an encrypted wallet.
+New Milkchain wallets encrypt their Ed25519 private keys with AES-256-GCM. A key is derived from a passphrase using scrypt; the passphrase is never written to the wallet file. The wallet file is created with owner-only permissions (0600 on POSIX), and the tool refuses to overwrite an existing file. The transaction CLI prompts for the passphrase when it opens an encrypted wallet. Wallet connections permit plain HTTP only for loopback nodes; remote nodes must use HTTPS.
 
 ```sh
 PYTHONPATH=milkchain python -m wallet create biscuits.wallet
