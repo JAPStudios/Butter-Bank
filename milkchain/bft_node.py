@@ -264,7 +264,19 @@ def main():
     base_state_path = cfg.get(
         "validator_state_file", f"data-{cfg.get('port', 8333)}.consensus.json"
     )
-    initial_activation = build_validator_activation(key, chain, base_state_path)
+    startup_recovery_failed = False
+    try:
+        initial_activation = build_validator_activation(key, chain, base_state_path)
+    except Exception:
+        LOGGER.exception(
+            "Active validator signing state could not be recovered; starting as an observer"
+        )
+        startup_recovery_failed = True
+        initial_activation = {
+            "validators": chain.validators, "signer": None,
+            "activation_height": chain.validator_activation_height,
+            "chain_height": len(chain.blocks),
+        }
     engine_ref = {}
 
     def persist_finalized(result):
@@ -300,6 +312,7 @@ def main():
         on_validator_set=create_current_signer,
     )
     engine_ref["engine"] = engine
+    engine.pending_validator_recovery = startup_recovery_failed
 
     def recover_synced_validator_set():
         return build_validator_activation(key, chain, base_state_path)
