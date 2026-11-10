@@ -28,6 +28,7 @@ def signing_bytes(tx): return canon({k:tx[k] for k in ('chain_id','sender','reci
 
 MAX_PEER_RESPONSE_BYTES=16*1024*1024
 MAX_CHAIN_PAGE_BLOCKS=100
+MAX_ACCOUNT_HISTORY_PAGE_SIZE=100
 
 
 def get(url, max_bytes=MAX_PEER_RESPONSE_BYTES):
@@ -74,6 +75,71 @@ def broadcast(peers,path,obj):
     for p in list(peers):
         try: post(p+path,obj)
         except Exception: pass
+
+
+def account_history(blocks, address, start=0, limit=50):
+    """Return a bounded newest-first account activity page and total event count."""
+    if not ishex(address, 32):
+        raise ValueError("address must be a 32-byte public key in hexadecimal")
+    if not isinstance(start, int) or isinstance(start, bool) or start < 0:
+        raise ValueError("history start must be a non-negative integer")
+    if (not isinstance(limit, int) or isinstance(limit, bool)
+            or not 1 <= limit <= MAX_ACCOUNT_HISTORY_PAGE_SIZE):
+        raise ValueError("history limit must be between 1 and 100")
+
+    events = []
+    for block in blocks:
+        height = block["height"]
+        timestamp = block["timestamp"]
+        transactions = block["transactions"]
+        for index, tx in enumerate(transactions):
+            if height == 0 and tx.get("type") == "genesis":
+                amount = tx.get("allocations", {}).get(address)
+                if amount is not None:
+                    events.append({
+                        "type": "genesis",
+                        "direction": "received",
+                        "block_height": height,
+                        "block_timestamp": timestamp,
+                        "transaction_index": index,
+                        "amount": amount,
+                    })
+                continue
+            if tx.get("type") == "coinbase":
+                if tx.get("recipient") == address:
+                    events.append({
+                        "type": "coinbase",
+                        "direction": "received",
+                        "block_height": height,
+                        "block_timestamp": timestamp,
+                        "transaction_index": index,
+                        "amount": tx["amount"],
+                    })
+                continue
+            sender = tx.get("sender")
+            recipient = tx.get("recipient")
+            if sender != address and recipient != address:
+                continue
+            direction = "self" if sender == address and recipient == address else (
+                "sent" if sender == address else "received"
+            )
+            event = {
+                "type": "transfer",
+                "direction": direction,
+                "block_height": height,
+                "block_timestamp": timestamp,
+                "transaction_index": index,
+                "sender": sender,
+                "recipient": recipient,
+                "amount": tx["amount"],
+            }
+            if sender == address:
+                event["fee"] = tx["fee"]
+                event["nonce"] = tx["nonce"]
+            events.append(event)
+
+    events.sort(key=lambda item: (item["block_height"], item["transaction_index"]), reverse=True)
+    return events[start:start + limit], len(events)
 
 def fetch_peer_chain(peer, status):
     """Download a peer chain in bounded pages so history can grow indefinitely."""
@@ -330,6 +396,46 @@ class API(BaseHTTPRequestHandler):
             with self.chain.lock:
                 page=list(self.chain.blocks[start:start+limit])
             self.sendj(200,{'start':start,'chain':page})
+        elif p=='/balance':
+            query=parse_qs(urlparse(self.path).query,keep_blank_values=True)
+            if set(query)!={'address'} or len(query['address'])!=1 or not ishex(query['address'][0],32):
+                self.sendj(400,{'error':'balance query requires one 32-byte hexadecimal address'});return
+            address=query['address'][0].lower()
+            with self.chain.lock: balances,nonces=self.chain.state()
+            self.sendj(200,{
+                'chain_id':self.chain.id,
+                'address':address,
+                'balance':balances.get(address,0),
+                'nonce':nonces.get(address,0),
+                'symbol':self.chain.cfg.get('symbol','COIN'),
+                'decimals':self.chain.cfg.get('decimals',0),
+            })
+        elif p=='/history':
+            query=parse_qs(urlparse(self.path).query,keep_blank_values=True)
+            if (set(query)-{'address','start','limit'} or 'address' not in query
+                    or len(query['address'])!=1 or not ishex(query['address'][0],32)
+                    or any(len(query.get(key,[]))!=1 for key in ('start','limit') if key in query)):
+                self.sendj(400,{'error':'history query requires one address and optional single start/limit values'});return
+            try:
+                raw_start=query.get('start',['0'])[0]
+                raw_limit=query.get('limit',['50'])[0]
+                if (not raw_start.isascii() or not raw_start.isdecimal()
+                        or not raw_limit.isascii() or not raw_limit.isdecimal()):
+                    raise ValueError("history start and limit must be decimal integers")
+                start,limit=int(raw_start),int(raw_limit)
+                address=query['address'][0].lower()
+                with self.chain.lock:
+                    events,total=account_history(self.chain.blocks,address,start,limit)
+                self.sendj(200,{
+                    'chain_id':self.chain.id,
+                    'address':address,
+                    'history':events,
+                    'total':total,
+                    'start':start,
+                    'limit':limit,
+                })
+            except ValueError as exc:
+                self.sendj(400,{'error':str(exc)})
         elif p=='/balances':
             with self.chain.lock: b,n=self.chain.state()
             self.sendj(200,{'balances':b,'nonces':n})
