@@ -27,7 +27,7 @@ from consensus import (
 )
 from signer import ConsensusSigner
 from engine import ConsensusEngine
-from consensus_network import ConsensusHTTPServer, read_json_message
+from consensus_network import ConsensusHTTPServer, read_json_message, normalize_peer_fingerprints
 from bft_node import bft_round_timeout_loop
 
 
@@ -704,6 +704,31 @@ class BFTPrimitiveTests(unittest.TestCase):
             engine = ConsensusEngine(signer, lambda block: block.get("hash"))
             with self.assertRaises(ValueError):
                 ConsensusHTTPServer(engine, host="0.0.0.0", port=0)
+
+    def test_remote_https_peers_require_mutual_tls_client_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            signer = ConsensusSigner(
+                self.keys_and_records[0][0], self.chain_id, self.validators,
+                Path(directory) / "remote-peer-state.json"
+            )
+            engine = ConsensusEngine(signer, lambda block: block.get("hash"))
+            with self.assertRaisesRegex(ValueError, "trusted CA and a client certificate"):
+                ConsensusHTTPServer(
+                    engine, peers=["https://validator.example:8334"],
+                    host="127.0.0.1", port=0
+                )
+            signer.close()
+
+    def test_peer_certificate_fingerprints_are_strictly_validated(self):
+        fingerprint = "AB" * 32
+        self.assertEqual(
+            normalize_peer_fingerprints([fingerprint]),
+            frozenset({fingerprint.lower()})
+        )
+        with self.assertRaises(ValueError):
+            normalize_peer_fingerprints(["not-a-fingerprint"])
+        with self.assertRaises(ValueError):
+            normalize_peer_fingerprints(["ab" * 32, "AB" * 32])
 
     @unittest.skipIf(os.name == "nt", "POSIX file-mode and symlink semantics")
     def test_signer_rejects_group_readable_state_file(self):
