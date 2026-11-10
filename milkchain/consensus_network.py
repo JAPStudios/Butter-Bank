@@ -1,7 +1,8 @@
 """HTTP transport for signed Biscuits BFT messages.
 
-Use HTTPS peer URLs in deployment. Messages are authenticated by the consensus
-signatures; transport encryption and peer admission remain deployment concerns.
+Remote consensus links require mutual TLS. Each remote peer must present a CA-trusted
+certificate whose SHA-256 fingerprint is explicitly allowlisted. Consensus signatures
+remain independently verified at the protocol layer.
 """
 import hashlib
 from collections import deque
