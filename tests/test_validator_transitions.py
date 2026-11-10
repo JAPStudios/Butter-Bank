@@ -34,6 +34,25 @@ class ValidatorTransitionTests(unittest.TestCase):
             self.new_set if new is None else new,
         )
 
+
+    def test_transition_quorum_uses_voting_power_not_validator_count(self):
+        weighted_old = [
+            {"public_key": key.public_key().public_bytes_raw().hex(), "voting_power": power}
+            for key, power in zip(self.old_keys, (7, 1, 1, 1))
+        ]
+        certificate = make_transition_certificate(
+            [self.old_keys[0]], self.chain_id, 10, weighted_old, self.new_set
+        )
+        self.assertTrue(
+            verify_transition_certificate(certificate, weighted_old, self.chain_id),
+            "one validator holding seven of ten voting power exceeds two-thirds",
+        )
+        insufficient = make_transition_certificate(
+            [self.old_keys[1], self.old_keys[2], self.old_keys[3]],
+            self.chain_id, 10, weighted_old, self.new_set
+        )
+        self.assertFalse(verify_transition_certificate(insufficient, weighted_old, self.chain_id))
+
     def test_transition_requires_strictly_more_than_two_thirds_old_voting_power(self):
         certificate = self.certificate()
         self.assertTrue(verify_transition_certificate(certificate, self.old_set, self.chain_id))

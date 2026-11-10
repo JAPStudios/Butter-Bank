@@ -181,7 +181,7 @@ def verify_transition_history(
     initial_validators: Sequence[Mapping[str, object]],
     expected_chain_id: str,
 ) -> bool:
-    """Verify a gap-free, strictly ordered succession of quorum-approved sets."""
+    """Verify a strictly ordered succession of quorum-approved sets."""
     try:
         if not isinstance(transitions, Sequence) or isinstance(transitions, (str, bytes)):
             return False
