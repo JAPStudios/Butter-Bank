@@ -95,11 +95,13 @@ class ValidatorTransitionTests(unittest.TestCase):
         second = make_transition_certificate(
             self.new_keys[:3], self.chain_id, 20, self.new_set, self.old_set
         )
-        self.assertEqual(validator_set_at_height([], self.old_set, self.chain_id, 9), self.old_set)
-        self.assertEqual(validator_set_at_height([first], self.old_set, self.chain_id, 9), self.old_set)
-        self.assertEqual(validator_set_at_height([first], self.old_set, self.chain_id, 10), self.new_set)
-        self.assertEqual(validator_set_at_height([first, second], self.old_set, self.chain_id, 19), self.new_set)
-        self.assertEqual(validator_set_at_height([first, second], self.old_set, self.chain_id, 20), self.old_set)
+        old_sorted = sorted(self.old_set, key=lambda item: item["public_key"])
+        new_sorted = sorted(self.new_set, key=lambda item: item["public_key"])
+        self.assertEqual(validator_set_at_height([], self.old_set, self.chain_id, 9), old_sorted)
+        self.assertEqual(validator_set_at_height([first], self.old_set, self.chain_id, 9), old_sorted)
+        self.assertEqual(validator_set_at_height([first], self.old_set, self.chain_id, 10), new_sorted)
+        self.assertEqual(validator_set_at_height([first, second], self.old_set, self.chain_id, 19), new_sorted)
+        self.assertEqual(validator_set_at_height([first, second], self.old_set, self.chain_id, 20), old_sorted)
 
     def test_validator_set_resolution_fails_closed_on_invalid_history(self):
         first = self.certificate(height=10)
