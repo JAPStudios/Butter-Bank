@@ -222,8 +222,8 @@ class ConsensusHTTPServer:
                         # Every validator independently prevotes a validated proposal.
                         try:
                             outer.publish_vote(outer.engine.prevote(proposal["block_hash"]))
-                        except ValueError:
-                            # A persisted lock may correctly prevent this vote.
+                        except (ValueError, RuntimeError):
+                            # A lock may prevent a vote; observers never sign.
                             pass
                         self.send_json(200, {"ok": True})
                         return
@@ -320,7 +320,7 @@ class ConsensusHTTPServer:
             self._broadcast("/consensus/proposal", message)
         try:
             self.publish_vote(self.engine.prevote(proposal["block_hash"]))
-        except ValueError:
+        except (ValueError, RuntimeError):
             pass
         return True
 
