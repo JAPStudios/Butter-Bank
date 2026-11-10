@@ -43,7 +43,7 @@ Do not use this prototype for real funds or expose its node API to the public in
 
 ## Security and scope
 
-No component in this repository should be represented as a licensed bank, deposit-taking institution, production wallet, or audited payment network. Real banking and payment functionality requires defined product requirements, regulated-provider integrations where applicable, security engineering, and legal/compliance review.
+The software currently in this repository does not yet implement deposit custody, external payment-rail settlement, credit issuance, or payroll integrations. The Android account viewer is read-only, and Milkchain remains a development implementation. Production deployment requires further security engineering, independent review, and the necessary provider integrations.
 
 ## Biscuits wallet key management
 
