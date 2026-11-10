@@ -2,6 +2,7 @@ package com.example.butterbank
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Intent
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
@@ -42,6 +43,7 @@ import java.util.concurrent.Executors
  */
 class MainActivity : Activity() {
     private val ledgerStore by lazy { LedgerStore(this) }
+    private val walletStore by lazy { WalletStore(this) }
     private val settings by lazy { getSharedPreferences("butter_bank_settings", MODE_PRIVATE) }
     private val networkExecutor = Executors.newSingleThreadExecutor()
     private var storageUnavailable = false
@@ -62,6 +64,8 @@ class MainActivity : Activity() {
     private lateinit var accountLoadButton: Button
     private lateinit var accountBalanceValue: TextView
     private lateinit var accountHistoryContainer: LinearLayout
+    private lateinit var walletStatusValue: TextView
+    private var pendingWalletBackup: String? = null
 
     private var monthlyBudgetCents: Long? = null
 
@@ -174,13 +178,23 @@ class MainActivity : Activity() {
                 13,
                 0xFF5B685F.toInt()
             ).apply { setPadding(0, 0, 0, dp(10)) })
+            walletStatusValue = label(
+                walletStore.publicAddress()?.let { "On-device wallet: $it" } ?: "No on-device wallet",
+                13,
+                0xFF244B35.toInt(),
+                true
+            ).apply { setPadding(0, 0, 0, dp(8)) }
+            addView(walletStatusValue)
+            addView(actionButton("Create on-device wallet") { createDeviceWallet() })
+            addView(actionButton("Import encrypted wallet backup") { chooseWalletBackupToImport() })
+            addView(actionButton("Export encrypted wallet backup") { exportWalletBackup() })
             nodeUrlInput = field("HTTPS Milkchain node URL")
             nodeUrlInput.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
             nodeUrlInput.setText(settings.getString(KEY_NODE_URL, ""))
             addView(nodeUrlInput)
             accountAddressInput = field("Biscuits public address (64 hexadecimal characters)")
             accountAddressInput.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
-            accountAddressInput.setText(settings.getString(KEY_ACCOUNT_ADDRESS, ""))
+            accountAddressInput.setText(settings.getString(KEY_ACCOUNT_ADDRESS, walletStore.publicAddress() ?: ""))
             addView(accountAddressInput)
             accountLoadButton = actionButton("Load Milkchain account") { loadMilkchainAccount() }
             addView(accountLoadButton)
@@ -421,6 +435,186 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun createDeviceWallet() {
+        if (walletStore.hasWallet()) {
+            toast("A wallet already exists on this device.")
+            return
+        }
+        try {
+            val public = walletStore.createWallet()
+            walletStatusValue.text = "On-device wallet: $public"
+            accountAddressInput.setText(public)
+            toast("Wallet created. Save an encrypted backup before changing devices or reinstalling.")
+            requestNewWalletBackupPassphrase { passphrase ->
+                saveWalletBackup(passphrase)
+            }
+        } catch (error: Exception) {
+            toast(error.message ?: "Could not create the wallet.")
+        }
+    }
+
+    private fun exportWalletBackup() {
+        if (!walletStore.hasWallet()) {
+            toast("Create or import a wallet first.")
+            return
+        }
+        requestNewWalletBackupPassphrase { passphrase ->
+            saveWalletBackup(passphrase)
+        }
+    }
+
+    private fun saveWalletBackup(passphrase: String) {
+        try {
+            pendingWalletBackup = walletStore.exportBackup(passphrase)
+            val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "application/json"
+                putExtra(Intent.EXTRA_TITLE, "biscuits-wallet-backup.json")
+            }
+            startActivityForResult(intent, REQUEST_EXPORT_WALLET_BACKUP)
+        } catch (error: Exception) {
+            pendingWalletBackup = null
+            toast(error.message ?: "Could not create the encrypted wallet backup.")
+        }
+    }
+
+    private fun chooseWalletBackupToImport() {
+        if (walletStore.hasWallet()) {
+            toast("A wallet already exists on this device. Export it before replacing device data.")
+            return
+        }
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/json"
+        }
+        startActivityForResult(intent, REQUEST_IMPORT_WALLET_BACKUP)
+    }
+
+    private fun requestWalletPassphrase(onSubmit: (String) -> Unit) {
+        val input = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            hint = "Wallet backup passphrase"
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Unlock encrypted wallet backup")
+            .setView(input)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Import", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val passphrase = input.text.toString()
+                if (passphrase.length < 12) {
+                    input.error = "Passphrase must contain at least 12 characters"
+                    return@setOnClickListener
+                }
+                dialog.dismiss()
+                onSubmit(passphrase)
+            }
+        }
+        dialog.show()
+    }
+
+    private fun requestNewWalletBackupPassphrase(onSubmit: (String) -> Unit) {
+        val fields = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), 0)
+        }
+        val first = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            hint = "New backup passphrase (12+ characters)"
+        }
+        val second = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            hint = "Confirm backup passphrase"
+        }
+        fields.addView(first)
+        fields.addView(second)
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Protect wallet backup")
+            .setMessage("The passphrase is not stored. It is required to restore this wallet from the backup file.")
+            .setView(fields)
+            .setNegativeButton("Later", null)
+            .setPositiveButton("Save backup", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val passphrase = first.text.toString()
+                if (passphrase.length < 12) {
+                    first.error = "Passphrase must contain at least 12 characters"
+                    return@setOnClickListener
+                }
+                if (passphrase != second.text.toString()) {
+                    second.error = "Passphrases do not match"
+                    return@setOnClickListener
+                }
+                dialog.dismiss()
+                onSubmit(passphrase)
+            }
+        }
+        dialog.show()
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (resultCode != RESULT_OK || data?.data == null) {
+            if (requestCode == REQUEST_EXPORT_WALLET_BACKUP) {
+                pendingWalletBackup = null
+                toast("Wallet remains stored on this device; export a backup before changing devices.")
+            }
+            return
+        }
+        val uri = data.data ?: return
+        when (requestCode) {
+            REQUEST_EXPORT_WALLET_BACKUP -> {
+                val backup = pendingWalletBackup ?: return
+                try {
+                    contentResolver.openOutputStream(uri)?.use {
+                        it.write(backup.toByteArray(StandardCharsets.UTF_8))
+                    } ?: throw IOException("Could not open the selected backup destination.")
+                    pendingWalletBackup = null
+                    toast("Encrypted wallet backup saved.")
+                } catch (error: Exception) {
+                    pendingWalletBackup = null
+                    toast(error.message ?: "Could not save the wallet backup.")
+                }
+            }
+            REQUEST_IMPORT_WALLET_BACKUP -> {
+                try {
+                    val backup = readWalletBackup(uri)
+                    requestWalletPassphrase { passphrase ->
+                        try {
+                            val public = walletStore.importBackup(backup, passphrase)
+                            walletStatusValue.text = "On-device wallet: $public"
+                            accountAddressInput.setText(public)
+                            toast("Encrypted wallet imported.")
+                        } catch (error: Exception) {
+                            toast(error.message ?: "Could not import the encrypted wallet.")
+                        }
+                    }
+                } catch (error: Exception) {
+                    toast(error.message ?: "Could not read the selected wallet backup.")
+                }
+            }
+        }
+    }
+
+    private fun readWalletBackup(uri: Uri): String {
+        val output = ByteArrayOutputStream()
+        contentResolver.openInputStream(uri)?.use { input ->
+            val buffer = ByteArray(8_192)
+            var total = 0
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                total += count
+                if (total > MAX_NODE_RESPONSE_BYTES) throw IOException("Wallet backup exceeds the 1 MB limit.")
+                output.write(buffer, 0, count)
+            }
+        } ?: throw IOException("Could not open the selected wallet backup.")
+        return String(output.toByteArray(), StandardCharsets.UTF_8)
+    }
+
     private fun loadMilkchainAccount() {
         val nodeUrl = try {
             validateNodeUrl(nodeUrlInput.text.toString().trim())
@@ -606,6 +800,8 @@ class MainActivity : Activity() {
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     companion object {
+        private const val REQUEST_EXPORT_WALLET_BACKUP = 4101
+        private const val REQUEST_IMPORT_WALLET_BACKUP = 4102
         private const val KEY_NODE_URL = "milkchain_node_url"
         private const val KEY_ACCOUNT_ADDRESS = "milkchain_account_address"
         private const val MAX_NODE_RESPONSE_BYTES = 1_000_000
