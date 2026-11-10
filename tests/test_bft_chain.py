@@ -63,6 +63,19 @@ class BFTChainTests(unittest.TestCase):
             "peers": [],
         }
 
+    def test_bft_chain_rejects_a_malformed_genesis_parent_without_raising(self):
+        with tempfile.TemporaryDirectory() as directory:
+            chain = BFTChain(self.cfg, Path(directory) / "malformed-parent.json")
+            candidate = {
+                "height": 1,
+                "previous_hash": "00" * 32,
+                "timestamp": 0,
+                "transactions": [],
+                "nonce": 0,
+                "hash": "00" * 32,
+            }
+            self.assertFalse(chain.valid_chain(["malformed-genesis", candidate]))
+
     def test_bft_chain_disables_issuance_until_supply_rules_are_defined(self):
         with tempfile.TemporaryDirectory() as directory:
             cfg = dict(self.cfg, block_reward=1)
