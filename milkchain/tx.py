@@ -48,6 +48,26 @@ def read_limited_response(response, max_bytes=MAX_NODE_RESPONSE_BYTES):
     return raw
 
 def canon(x): return json.dumps(x,sort_keys=True,separators=(',',':')).encode()
+def next_account_nonce(account, mempool, public_key):
+    """Select the next nonce from one confirmed account and its pending sends."""
+    if (not isinstance(account, dict) or account.get("address") != public_key
+            or not isinstance(account.get("nonce"), int)
+            or isinstance(account.get("nonce"), bool) or account["nonce"] < 0):
+        raise ValueError("node returned an invalid account response")
+    if not isinstance(mempool, dict) or not isinstance(mempool.get("transactions"), list):
+        raise ValueError("node returned an invalid mempool response")
+    next_nonce = account["nonce"] + 1
+    pending = []
+    for item in mempool["transactions"]:
+        if not isinstance(item, dict) or item.get("sender") != public_key:
+            continue
+        nonce = item.get("nonce")
+        if not isinstance(nonce, int) or isinstance(nonce, bool) or nonce < 1:
+            raise ValueError("node returned an invalid pending transaction nonce")
+        pending.append(nonce)
+    return max(next_nonce, max(pending) + 1 if pending else next_nonce)
+
+
 def get_json(url):
     req=urllib.request.Request(url,headers={'Accept':'application/json'})
     with urllib.request.urlopen(req,timeout=5) as r: return json.loads(read_limited_response(r))
@@ -84,12 +104,8 @@ def main():
     nonce=a.nonce
     if nonce is None:
         try:
-            if account.get('address')!=public_hex or not isinstance(account.get('nonce'),int) or isinstance(account.get('nonce'),bool):
-                raise ValueError('node returned an invalid account response')
-            nonce=account['nonce']+1
-            pending=[item['nonce'] for item in mempool['transactions'] if isinstance(item,dict) and item.get('sender')==public_hex and isinstance(item.get('nonce'),int) and not isinstance(item.get('nonce'),bool)]
-            if pending: nonce=max(nonce,max(pending)+1)
-        except (KeyError,TypeError): p.error('node returned invalid nonce or mempool data')
+            nonce=next_account_nonce(account,mempool,public_hex)
+        except ValueError as e: p.error(str(e))
     if not isinstance(nonce,int) or isinstance(nonce,bool) or nonce<1: p.error('--nonce must be a positive integer')
     tx={'chain_id':chain_id,'sender':public_hex,'recipient':a.to.lower(),'amount':a.amount,'fee':a.fee,'nonce':nonce}
     tx['signature']=key.sign(canon(tx)).hex()
