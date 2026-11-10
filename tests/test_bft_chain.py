@@ -201,6 +201,21 @@ class BFTChainTests(unittest.TestCase):
     def test_transition_certificate_cannot_be_added_after_its_activation_height(self):
         with tempfile.TemporaryDirectory() as directory:
             chain = BFTChain(self.cfg, Path(directory) / "late-transition.json")
+            old_by_public = {
+                key.public_key().public_bytes_raw().hex(): key
+                for key in self.validator_keys
+            }
+            first_proposer = select_proposer(chain.validators, 1, 0)
+            first = chain.build_proposal(first_proposer)
+            first_votes = [
+                make_vote(old_by_public[item["public_key"]], self.chain_id,
+                          1, 0, "precommit", first["hash"],
+                          validator_set_hash(chain.initial_validators))
+                for item in chain.initial_validators[:3]
+            ]
+            accepted, message = chain.accept_finalized_block(first, 0, first_votes)
+            self.assertTrue(accepted, message)
+
             next_keys = [Ed25519PrivateKey.generate() for _ in range(4)]
             next_set = [
                 {"public_key": key.public_key().public_bytes_raw().hex(),
@@ -208,10 +223,10 @@ class BFTChainTests(unittest.TestCase):
                 for key in next_keys
             ]
             certificate = make_transition_certificate(
-                self.validator_keys[:3], self.chain_id, 1,
+                self.validator_keys[:3], self.chain_id, 2,
                 chain.initial_validators, next_set,
             )
-            proposer = select_proposer(chain.validators, 1, 0)
+            proposer = select_proposer(chain.validators, 2, 0)
             block = chain.build_proposal(proposer, validator_transition=certificate)
             self.assertIsNone(chain.validate_proposal_block(block))
 
