@@ -456,6 +456,29 @@ class AccountQueryApiTests(unittest.TestCase):
             second_page["history"][0]["transaction_index"],
         )
 
+    def test_mempool_endpoint_can_filter_pending_transactions_by_sender(self):
+        _, _, second_recipient = wallet()
+        tx = {
+            "chain_id": self.chain.id,
+            "sender": self.sender,
+            "recipient": second_recipient,
+            "amount": 10,
+            "fee": 1,
+            "nonce": 2,
+        }
+        tx["signature"] = self.sender_key.sign(signing_bytes(tx)).hex()
+        self.assertEqual(self.chain.add_tx(tx), (True, "accepted"))
+
+        sender_pool = get(f"{self.base_url}/mempool?address={self.sender}")
+        recipient_pool = get(f"{self.base_url}/mempool?address={self.recipient}")
+        all_pool = get(f"{self.base_url}/mempool")
+        self.assertEqual(sender_pool["transactions"], [tx])
+        self.assertEqual(recipient_pool["transactions"], [])
+        self.assertEqual(all_pool["transactions"], [tx])
+
+        with self.assertRaises(Exception):
+            get(f"{self.base_url}/mempool?address=invalid")
+
     def test_account_query_endpoints_reject_invalid_addresses_and_page_sizes(self):
         for path in (
             "/balance?address=not-an-address",
