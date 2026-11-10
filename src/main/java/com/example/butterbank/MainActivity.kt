@@ -175,9 +175,11 @@ class MainActivity : Activity() {
                 0xFF5B685F.toInt()
             ).apply { setPadding(0, 0, 0, dp(10)) })
             nodeUrlInput = field("HTTPS Milkchain node URL")
+            nodeUrlInput.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
             nodeUrlInput.setText(settings.getString(KEY_NODE_URL, ""))
             addView(nodeUrlInput)
             accountAddressInput = field("Biscuits public address (64 hexadecimal characters)")
+            accountAddressInput.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
             accountAddressInput.setText(settings.getString(KEY_ACCOUNT_ADDRESS, ""))
             addView(accountAddressInput)
             accountLoadButton = actionButton("Load Milkchain account") { loadMilkchainAccount() }
