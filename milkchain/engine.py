@@ -54,6 +54,7 @@ class ConsensusEngine:
         self.validator_activation_height = validator_activation_height
         self.total_power = sum(validator_map.values())
         self.active = signer is not None
+        self.pending_validator_recovery = False
         self._height = signer.height if signer is not None else initial_height
         self.block_validator = block_validator
         if on_finalized is not None and not callable(on_finalized):
@@ -96,6 +97,7 @@ class ConsensusEngine:
         self._height = target_height
         self.signer = signer
         self.active = signer is not None
+        self.pending_validator_recovery = False
         self.validator_power = normalized
         self.validators = [
             {"public_key": key, "voting_power": power}
@@ -257,13 +259,14 @@ class ConsensusEngine:
                 }:
                     raise ValueError("validator activation callback returned an invalid result")
                 replacement = None
+                self.pending_validator_recovery = False
                 if self.on_validator_set is not None:
                     try:
                         replacement = self.on_validator_set()
                     except Exception:
                         # Finality is durable; remain an observer if new signer
                         # state cannot yet be opened safely. The sync loop retries.
-                        replacement = None
+                        self.pending_validator_recovery = True
                 self.activate_validator_set(
                     activation["validators"], replacement,
                     activation["activation_height"], activation["chain_height"],
