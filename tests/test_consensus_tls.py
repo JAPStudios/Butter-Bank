@@ -21,7 +21,7 @@ from signer import ConsensusSigner
 
 class MutualTlsTransportTests(unittest.TestCase):
     def test_allowlisted_client_certificate_completes_mutual_tls_handshake(self):
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
         ca_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Butter Bank test CA")])
         ca_cert = (
