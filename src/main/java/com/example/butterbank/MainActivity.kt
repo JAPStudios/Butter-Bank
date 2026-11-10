@@ -32,6 +32,7 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
+import java.math.BigInteger
 import java.util.concurrent.Executors
 
 /**
@@ -65,6 +66,9 @@ class MainActivity : Activity() {
     private lateinit var accountBalanceValue: TextView
     private lateinit var accountHistoryContainer: LinearLayout
     private lateinit var walletStatusValue: TextView
+    private lateinit var recipientInput: EditText
+    private lateinit var sendAmountInput: EditText
+    private lateinit var sendButton: Button
     private var pendingWalletBackup: String? = null
 
     private var monthlyBudgetCents: Long? = null
@@ -206,6 +210,20 @@ class MainActivity : Activity() {
                 orientation = LinearLayout.VERTICAL
             }
             addView(accountHistoryContainer)
+            addView(label(
+                "Send Biscuits on Milkchain. The network transaction fee is zero; this does not transfer bank deposits or dollars.",
+                13,
+                0xFF5B685F.toInt()
+            ).apply { setPadding(0, dp(12), 0, dp(6)) })
+            recipientInput = field("Recipient public address (64 hexadecimal characters)")
+            recipientInput.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+            addView(recipientInput)
+            sendAmountInput = field("Amount in Biscuits")
+            sendAmountInput.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            addView(sendAmountInput)
+            sendButton = actionButton("Send Biscuits (zero network fee)") { submitMilkchainTransaction() }
+            sendButton.isEnabled = walletStore.hasWallet()
+            addView(sendButton)
         })
 
         page.addView(sectionHeading("Add a record"))
@@ -444,6 +462,7 @@ class MainActivity : Activity() {
             val public = walletStore.createWallet()
             walletStatusValue.text = "On-device wallet: $public"
             accountAddressInput.setText(public)
+            sendButton.isEnabled = true
             toast("Wallet created. Save an encrypted backup before changing devices or reinstalling.")
             requestNewWalletBackupPassphrase { passphrase ->
                 saveWalletBackup(passphrase)
@@ -587,6 +606,7 @@ class MainActivity : Activity() {
                             val public = walletStore.importBackup(backup, passphrase)
                             walletStatusValue.text = "On-device wallet: $public"
                             accountAddressInput.setText(public)
+                            sendButton.isEnabled = true
                             toast("Encrypted wallet imported.")
                         } catch (error: Exception) {
                             toast(error.message ?: "Could not import the encrypted wallet.")
@@ -691,6 +711,170 @@ class MainActivity : Activity() {
             }
         }
     }
+
+    private fun submitMilkchainTransaction() {
+        if (!walletStore.hasWallet()) {
+            toast("Create or import an encrypted wallet first.")
+            return
+        }
+        val sender = walletStore.publicAddress() ?: run {
+            toast("The on-device wallet has no public address.")
+            return
+        }
+        val nodeUrl = try {
+            validateNodeUrl(nodeUrlInput.text.toString().trim())
+        } catch (error: IllegalArgumentException) {
+            toast(error.message ?: "Enter a valid HTTPS node URL.")
+            return
+        }
+        val configuredAddress = accountAddressInput.text.toString().trim().lowercase(Locale.ROOT)
+        if (configuredAddress != sender) accountAddressInput.setText(sender)
+        val recipient = recipientInput.text.toString().trim().lowercase(Locale.ROOT)
+        if (!recipient.matches(Regex("^[0-9a-f]{64}$")) || recipient == sender) {
+            toast("Enter a valid recipient address different from the sending wallet.")
+            return
+        }
+        val amountText = sendAmountInput.text.toString()
+        sendButton.isEnabled = false
+
+        networkExecutor.execute {
+            try {
+                val account = fetchJson("$nodeUrl/balance?address=$sender")
+                if (account.getString("address") != sender) {
+                    throw IOException("The node returned a different account address.")
+                }
+                val decimals = account.getInt("decimals")
+                if (decimals !in 0..18) throw IOException("The node returned unsupported Biscuits precision.")
+                val amount = TokenAmount.parsePositiveAtomicUnits(amountText, decimals)
+                    ?: throw IllegalArgumentException("Enter a positive amount with no more than $decimals decimal places.")
+                val balance = BigInteger(account.get("balance").toString())
+                if (amount > balance) throw IllegalArgumentException("The account balance is insufficient.")
+                val displayAmount = TokenAmount.formatAtomicUnits(amount.toString(), decimals)
+                val symbol = account.optString("symbol", "Biscuits")
+
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    val dialog = AlertDialog.Builder(this)
+                        .setTitle("Confirm Biscuits transfer")
+                        .setMessage(
+                            "Send $displayAmount $symbol to $recipient?\n\n" +
+                                "Network transaction fee: 0.\n" +
+                                "A finalized blockchain transfer cannot be reversed."
+                        )
+                        .setNegativeButton("Cancel") { _, _ -> sendButton.isEnabled = true }
+                        .setPositiveButton("Submit transfer") { _, _ ->
+                            networkExecutor.execute {
+                                submitConfirmedTransfer(nodeUrl, sender, recipient, amountText)
+                            }
+                        }
+                        .create()
+                    dialog.setOnCancelListener { sendButton.isEnabled = true }
+                    dialog.show()
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    sendButton.isEnabled = true
+                    toast(error.message ?: "Could not prepare the Milkchain transfer.")
+                }
+            }
+        }
+    }
+
+    private fun submitConfirmedTransfer(
+        nodeUrl: String,
+        sender: String,
+        recipient: String,
+        amountText: String
+    ) {
+        try {
+            val status = fetchJson("$nodeUrl/status")
+            val chainId = status.getString("chain_id")
+            val account = fetchJson("$nodeUrl/balance?address=$sender")
+            if (account.getString("address") != sender) {
+                throw IOException("The node returned a different account address.")
+            }
+            val decimals = account.getInt("decimals")
+            if (decimals !in 0..18) throw IOException("The node returned unsupported Biscuits precision.")
+            val amount = TokenAmount.parsePositiveAtomicUnits(amountText, decimals)
+                ?: throw IllegalArgumentException("Enter a positive amount with no more than $decimals decimal places.")
+            val balance = BigInteger(account.get("balance").toString())
+            if (amount > balance) throw IllegalArgumentException("The account balance is now insufficient.")
+
+            val mempool = fetchJson("$nodeUrl/mempool?address=$sender")
+            val pending = mempool.getJSONArray("transactions")
+            var nonce = BigInteger(account.get("nonce").toString()) + BigInteger.ONE
+            for (index in 0 until pending.length()) {
+                val item = pending.getJSONObject(index)
+                if (item.optString("sender") != sender) continue
+                val pendingNonce = BigInteger(item.get("nonce").toString())
+                if (pendingNonce >= nonce) nonce = pendingNonce + BigInteger.ONE
+            }
+
+            val canonical = MilkchainTransaction.canonicalBytes(chainId, sender, recipient, amount, nonce)
+            val signature = walletStore.sign(canonical).toHex()
+            val requestBody = MilkchainTransaction.signedJson(canonical, signature)
+            val response = postJson("$nodeUrl/tx", requestBody)
+            val accepted = response.optBoolean("accepted", false)
+            val message = response.optString("message", if (accepted) "accepted" else "rejected")
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                sendButton.isEnabled = true
+                if (accepted) {
+                    toast("Transaction accepted by the node; awaiting block finality.")
+                    loadMilkchainAccount()
+                } else {
+                    toast("Transaction rejected: $message")
+                }
+            }
+        } catch (error: Exception) {
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                sendButton.isEnabled = true
+                toast(error.message ?: "Could not submit the Milkchain transaction.")
+            }
+        }
+    }
+
+    private fun postJson(address: String, body: String): JSONObject {
+        val connection = URL(address).openConnection() as HttpURLConnection
+        connection.requestMethod = "POST"
+        connection.instanceFollowRedirects = false
+        connection.connectTimeout = 8_000
+        connection.readTimeout = 8_000
+        connection.doOutput = true
+        connection.setRequestProperty("Accept", "application/json")
+        connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+        try {
+            connection.outputStream.use { it.write(body.toByteArray(StandardCharsets.UTF_8)) }
+            val status = connection.responseCode
+            val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+            val output = ByteArrayOutputStream()
+            stream?.use { input ->
+                val buffer = ByteArray(8_192)
+                var total = 0
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    total += count
+                    if (total > MAX_NODE_RESPONSE_BYTES) {
+                        throw IOException("Milkchain response exceeds the 1 MB limit.")
+                    }
+                    output.write(buffer, 0, count)
+                }
+            }
+            val json = JSONObject(String(output.toByteArray(), StandardCharsets.UTF_8))
+            if (status !in 200..299) {
+                throw IOException(json.optString("error", "Milkchain node returned HTTP $status."))
+            }
+            return json
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun ByteArray.toHex(): String =
+        joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
     private fun validateNodeUrl(raw: String): String {
         val uri = Uri.parse(raw)

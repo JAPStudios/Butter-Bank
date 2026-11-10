@@ -83,4 +83,24 @@ object TokenAmount {
         val amount = BigInteger(raw)
         return BigDecimal(amount, decimals).stripTrailingZeros().toPlainString()
     }
+
+    fun parsePositiveAtomicUnits(raw: String, decimals: Int, locale: Locale = Locale.getDefault()): BigInteger? {
+        if (decimals !in 0..18) return null
+        val symbols = DecimalFormatSymbols.getInstance(locale)
+        val separator = symbols.decimalSeparator
+        val input = raw.trim()
+        if (symbols.groupingSeparator != separator && input.contains(symbols.groupingSeparator)) return null
+        val normalized = if (separator == '.') input else input.replace(separator, '.')
+        return try {
+            val amount = BigDecimal(normalized)
+            if (amount <= BigDecimal.ZERO) null
+            else amount.setScale(decimals, RoundingMode.UNNECESSARY)
+                .movePointRight(decimals)
+                .toBigIntegerExact()
+        } catch (_: NumberFormatException) {
+            null
+        } catch (_: ArithmeticException) {
+            null
+        }
+    }
 }

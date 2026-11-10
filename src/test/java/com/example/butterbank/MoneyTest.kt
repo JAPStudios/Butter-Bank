@@ -2,6 +2,7 @@ package com.example.butterbank
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertNull
 import org.junit.Test
 import java.util.Locale
 
@@ -12,6 +13,17 @@ class MoneyTest {
         assertEquals("1", TokenAmount.formatAtomicUnits("100000000", 8))
         assertEquals("0.00000001", TokenAmount.formatAtomicUnits("1", 8))
         assertEquals("123", TokenAmount.formatAtomicUnits("123", 0))
+    }
+
+    @Test
+    fun parsesTokenAmountsWithoutRounding() {
+        assertEquals(java.math.BigInteger("123456789"), TokenAmount.parsePositiveAtomicUnits("1.23456789", 8))
+        assertEquals(java.math.BigInteger.ONE, TokenAmount.parsePositiveAtomicUnits("0.00000001", 8))
+        assertNull(TokenAmount.parsePositiveAtomicUnits("1.000000001", 8))
+        assertNull(TokenAmount.parsePositiveAtomicUnits("0", 8))
+        assertNull(TokenAmount.parsePositiveAtomicUnits("not-a-number", 8))
+        assertEquals(java.math.BigInteger("125"), TokenAmount.parsePositiveAtomicUnits("1,25", 2, java.util.Locale.GERMANY))
+        assertNull(TokenAmount.parsePositiveAtomicUnits("1.234", 2, java.util.Locale.GERMANY))
     }
 
     @Test(expected = IllegalArgumentException::class)
