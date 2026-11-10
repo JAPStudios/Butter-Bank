@@ -41,10 +41,15 @@ class BFTAPI(API):
                 raise ValueError("proposal request contains unsupported fields")
             chain = self.chain
             key = self.consensus_key
-            signer = self.consensus_server.engine.signer
+            engine = self.consensus_server.engine
+            if not engine.active:
+                self.sendj(409, {
+                    "ok": False,
+                    "error": "validator signing state is unavailable; this node is operating as an observer",
+                })
+                return
             proposer = key.public_key().public_bytes_raw().hex()
-            selected = select_proposer(chain.validators, signer.height,
-                                       self.consensus_server.engine.round)
+            selected = select_proposer(chain.validators, engine.height, engine.round)
             if proposer != selected:
                 self.sendj(409, {"ok": False, "error": "this validator is not the proposer for the current round",
                                  "selected_proposer": selected})
@@ -58,8 +63,8 @@ class BFTAPI(API):
             elif not isinstance(block, dict) or chain.validate_proposal_block(block) is None:
                 raise ValueError("supplied proposal block is invalid for the current finalized chain")
             proposal = make_proposal(
-                key, chain.id, signer.height, self.consensus_server.engine.round,
-                block["hash"], self.consensus_server.engine.signer.validators_hash,
+                key, chain.id, engine.height, engine.round,
+                block["hash"], engine.validator_set_hash,
                 request.get("valid_round"),
                 request.get("valid_round_certificate", []),
             )
@@ -98,7 +103,48 @@ def load_validator_key(path):
     return Ed25519PrivateKey.from_private_bytes(seed)
 
 
-def bft_peer_sync_loop(chain, engine, interval=10, stop_event=None):
+def validator_state_path(base_path, chain):
+    """Use a distinct durable signing history for each validator-set activation."""
+    base = Path(base_path)
+    if chain.validator_activation_height == 1:
+        return base
+    return base.with_name(
+        f"{base.name}.activation-{chain.validator_activation_height}."
+        f"set-{chain.validators_hash}.json"
+    )
+
+
+def build_validator_activation(key, chain, base_state_path):
+    """Create or recover signing state only for a key in the active validator set."""
+    public_key = key.public_key().public_bytes_raw().hex()
+    signer = None
+    if public_key in {item["public_key"] for item in chain.validators}:
+        signer = ConsensusSigner(
+            key, chain.id, chain.validators,
+            validator_state_path(base_state_path, chain),
+            initial_height=chain.validator_activation_height,
+        )
+        try:
+            if signer.height < chain.validator_activation_height:
+                raise ValueError("validator signing state predates its active-set activation")
+            if signer.height < len(chain.blocks):
+                signer.catch_up(chain.blocks[signer.height:])
+            if signer.height != len(chain.blocks):
+                raise ValueError(
+                    "validator signing history does not match the finalized chain height"
+                )
+        except Exception:
+            signer.close()
+            raise
+    return {
+        "validators": chain.validators,
+        "signer": signer,
+        "activation_height": chain.validator_activation_height,
+        "chain_height": len(chain.blocks),
+    }
+
+
+def bft_peer_sync_loop(chain, engine, interval=10, stop_event=None, on_validator_set=None):
     """Keep peer synchronization alive across transient peer and storage failures."""
     if not isinstance(interval, (int, float)) or isinstance(interval, bool):
         raise ValueError("peer sync interval must be a finite positive number")
@@ -121,6 +167,23 @@ def bft_peer_sync_loop(chain, engine, interval=10, stop_event=None):
                 LOGGER.warning("BFT peer synchronization failed for %s", peer, exc_info=True)
                 continue
         try:
+            if (hasattr(engine, "validator_set_hash") and (
+                    getattr(engine, "pending_validator_recovery", False)
+                    or engine.validator_set_hash != getattr(chain, "validators_hash", None)
+                    or engine.validator_activation_height != getattr(
+                        chain, "validator_activation_height", None
+                    ))):
+                activation = (
+                    on_validator_set() if on_validator_set is not None else {
+                        "validators": chain.validators, "signer": None,
+                        "activation_height": chain.validator_activation_height,
+                        "chain_height": len(chain.blocks),
+                    }
+                )
+                engine.activate_validator_set(
+                    activation["validators"], activation["signer"],
+                    activation["activation_height"], activation["chain_height"],
+                )
             with chain.lock:
                 committed_snapshot = list(chain.blocks)
             engine.catch_up_chain(committed_snapshot)
@@ -171,7 +234,8 @@ def bft_round_timeout_loop(consensus_server, initial_timeout=10.0,
             observed = current
             timeout = float(initial_timeout)
             continue
-        pending = engine.signer.pending_round_change_targets
+        pending = (engine.signer.pending_round_change_targets
+                   if getattr(engine, "active", True) else ())
         target_round = min(pending) if pending else engine.round + 1
         try:
             consensus_server.publish_round_change(target_round)
@@ -197,15 +261,24 @@ def main():
         )
     chain = BFTChain(cfg, args.data or f"data-{cfg.get('port', 8333)}.json")
     key = load_validator_key(cfg["validator_private_key_file"])
-    signer = ConsensusSigner(
-        key, chain.id, chain.validators,
-        cfg.get("validator_state_file", f"data-{cfg.get('port', 8333)}.consensus.json"),
-        initial_height=len(chain.blocks),
+    base_state_path = cfg.get(
+        "validator_state_file", f"data-{cfg.get('port', 8333)}.consensus.json"
     )
-    if signer.height < len(chain.blocks):
-        signer.catch_up(chain.blocks[signer.height:])
-    if signer.height != len(chain.blocks):
-        raise SystemExit("Validator signer height does not match finalized chain height; refusing to sign.")
+    startup_recovery_failed = False
+    try:
+        initial_activation = build_validator_activation(key, chain, base_state_path)
+    except Exception:
+        LOGGER.exception(
+            "Active validator signing state could not be recovered; starting as an observer"
+        )
+        startup_recovery_failed = True
+        initial_activation = {
+            "validators": chain.validators, "signer": None,
+            "activation_height": chain.validator_activation_height,
+            "chain_height": len(chain.blocks),
+        }
+    engine_ref = {}
+
     def persist_finalized(result):
         ok, message = chain.accept_finalized_block(
             result["block"], result["round"], result["commit_votes"],
@@ -213,10 +286,37 @@ def main():
         )
         if not ok:
             raise RuntimeError(message)
+        engine = engine_ref.get("engine")
+        if engine is not None and (
+            engine.validator_set_hash != chain.validators_hash
+            or engine.validator_activation_height != chain.validator_activation_height
+        ):
+            return {
+                "validators": chain.validators,
+                "activation_height": chain.validator_activation_height,
+                "chain_height": len(chain.blocks),
+            }
+        return None
+
+    def create_current_signer():
+        return build_validator_activation(key, chain, base_state_path)["signer"]
 
     engine = ConsensusEngine(
-        signer, chain.validate_proposal_block, on_finalized=persist_finalized
+        initial_activation["signer"],
+        chain.validate_proposal_block,
+        on_finalized=persist_finalized,
+        validators=chain.validators,
+        chain_id=chain.id,
+        initial_height=len(chain.blocks),
+        validator_activation_height=chain.validator_activation_height,
+        on_validator_set=create_current_signer,
     )
+    engine_ref["engine"] = engine
+    engine.pending_validator_recovery = startup_recovery_failed
+
+    def recover_synced_validator_set():
+        return build_validator_activation(key, chain, base_state_path)
+
     try:
         consensus_server = ConsensusHTTPServer(
             engine,
@@ -231,7 +331,8 @@ def main():
             tls_peer_fingerprints=cfg.get("consensus_tls_peer_fingerprints", []),
         )
     except Exception:
-        signer.close()
+        if engine.signer is not None:
+            engine.signer.close()
         raise
     BFTAPI.chain = chain
     BFTAPI.peers = chain.peers
@@ -244,7 +345,8 @@ def main():
         )
     except Exception:
         consensus_server.server.server_close()
-        signer.close()
+        if engine.signer is not None:
+            engine.signer.close()
         raise
 
     consensus_thread = threading.Thread(
@@ -266,11 +368,11 @@ def main():
     peer_sync_stop = threading.Event()
     peer_sync_thread = threading.Thread(
         target=bft_peer_sync_loop,
-        args=(chain, engine, 10, peer_sync_stop),
+        args=(chain, engine, 10, peer_sync_stop, recover_synced_validator_set),
         daemon=True,
     )
     peer_sync_thread.start()
-    print(f"Biscuits BFT node on {cfg.get('host')}:{cfg.get('port')} "
+    print(f"Milkchain BFT node on {cfg.get('host')}:{cfg.get('port')} "
           f"| chain={chain.id} | height={len(chain.blocks)-1} "
           f"| validators={len(chain.validators)}")
     try:
@@ -285,7 +387,8 @@ def main():
         timeout_thread.join(timeout=5)
         peer_sync_thread.join(timeout=5)
         consensus_thread.join(timeout=5)
-        signer.close()
+        if engine.signer is not None:
+            engine.signer.close()
 
 
 if __name__ == "__main__":
