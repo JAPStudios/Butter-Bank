@@ -50,6 +50,7 @@ class ConsensusEngine:
             for key, power in validator_map.items()
         ]
         self.validator_set_hash = validator_set_hash(self.validators)
+        self._height = signer.height if signer is not None else initial_height
         if (not isinstance(validator_activation_height, int)
                 or isinstance(validator_activation_height, bool)
                 or validator_activation_height < 1
@@ -59,7 +60,6 @@ class ConsensusEngine:
         self.total_power = sum(validator_map.values())
         self.active = signer is not None
         self.pending_validator_recovery = False
-        self._height = signer.height if signer is not None else initial_height
         self.block_validator = block_validator
         if on_finalized is not None and not callable(on_finalized):
             raise TypeError("on_finalized must be callable")
