@@ -180,7 +180,8 @@ class BFTChain(Chain):
                     return False
                 if (require_certificates or index < len(blocks) - 1) and not has_certificate:
                     return False
-                if block.get("hash") != bft_block_hash(block):
+                if (block.get("previous_hash") != blocks[index - 1].get("hash")
+                        or block.get("hash") != bft_block_hash(block)):
                     return False
                 if has_certificate:
                     round_number = block["commit_round"]
@@ -218,6 +219,7 @@ class BFTChain(Chain):
                     ):
                         return False
                 base_block = {key: block[key] for key in base_fields}
+                base_block["previous_hash"] = cleaned[-1]["hash"]
                 base_block["hash"] = bhash(base_block)
                 cleaned.append(base_block)
             old_diff = self.diff
