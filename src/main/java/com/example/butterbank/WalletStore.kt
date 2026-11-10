@@ -27,27 +27,46 @@ class WalletStore(context: Context) {
     fun createWallet(): String {
         if (hasWallet()) throw IllegalStateException("A wallet already exists on this device.")
         val material = WalletBackupCodec.generate()
-        store(material)
-        return material.publicKey
+        return try {
+            store(material)
+            material.publicKey
+        } finally {
+            material.privateSeed.fill(0)
+        }
     }
 
     @Throws(IOException::class)
     fun importBackup(backup: String, passphrase: String): String {
         if (hasWallet()) throw IllegalStateException("A wallet already exists on this device.")
         val material = WalletBackupCodec.import(backup, passphrase)
-        store(material)
-        return material.publicKey
+        return try {
+            store(material)
+            material.publicKey
+        } finally {
+            material.privateSeed.fill(0)
+        }
     }
 
     @Throws(IOException::class)
     fun exportBackup(passphrase: String): String {
         val seed = decryptSeed()
-        val public = publicAddress() ?: throw IOException("Wallet public key is missing.")
-        return WalletBackupCodec.export(WalletMaterial(seed, public), passphrase)
+        return try {
+            val public = publicAddress() ?: throw IOException("Wallet public key is missing.")
+            WalletBackupCodec.export(WalletMaterial(seed, public), passphrase)
+        } finally {
+            seed.fill(0)
+        }
     }
 
     @Throws(IOException::class)
-    fun sign(message: ByteArray): ByteArray = WalletBackupCodec.sign(decryptSeed(), message)
+    fun sign(message: ByteArray): ByteArray {
+        val seed = decryptSeed()
+        return try {
+            WalletBackupCodec.sign(seed, message)
+        } finally {
+            seed.fill(0)
+        }
+    }
 
     private fun store(material: WalletMaterial) {
         val expectedPublic = WalletBackupCodec.publicKey(material.privateSeed)
