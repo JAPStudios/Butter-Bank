@@ -1,6 +1,7 @@
 package com.example.butterbank
 
 import java.math.BigDecimal
+import java.math.BigInteger
 import java.math.RoundingMode
 import java.text.DecimalFormatSymbols
 import java.text.NumberFormat
@@ -73,4 +74,13 @@ object LedgerMath {
             }
             Math.addExact(balance, signedAmount)
         }
+}
+
+
+object TokenAmount {
+    fun formatAtomicUnits(raw: String, decimals: Int): String {
+        require(decimals in 0..18) { "decimals must be between 0 and 18" }
+        val amount = BigInteger(raw)
+        return BigDecimal(amount, decimals).stripTrailingZeros().toPlainString()
+    }
 }

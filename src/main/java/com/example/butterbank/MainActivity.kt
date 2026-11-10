@@ -5,6 +5,7 @@ import android.app.AlertDialog
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.net.Uri
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
@@ -24,16 +25,25 @@ import java.text.DateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.UUID
+import java.util.Locale
+import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
+import java.nio.charset.StandardCharsets
+import java.util.concurrent.Executors
 
 /**
  * Offline-first Butter Bank prototype.
  *
- * This screen is a local personal-finance ledger only. It does not create a
- * bank account, hold deposits, issue credit, connect to payment rails, or
- * represent a balance held by a financial institution.
+ * This screen combines a local personal-finance ledger with a read-only
+ * public Milkchain account viewer. It does not create a bank account, hold
+ * deposits, issue credit, or connect to external payment rails.
  */
 class MainActivity : Activity() {
     private val ledgerStore by lazy { LedgerStore(this) }
+    private val settings by lazy { getSharedPreferences("butter_bank_settings", MODE_PRIVATE) }
+    private val networkExecutor = Executors.newSingleThreadExecutor()
     private var storageUnavailable = false
     private val entries = mutableListOf<LedgerEntry>()
 
@@ -47,6 +57,11 @@ class MainActivity : Activity() {
     private lateinit var categoryInput: EditText
     private lateinit var typeSpinner: Spinner
     private lateinit var budgetInput: EditText
+    private lateinit var nodeUrlInput: EditText
+    private lateinit var accountAddressInput: EditText
+    private lateinit var accountLoadButton: Button
+    private lateinit var accountBalanceValue: TextView
+    private lateinit var accountHistoryContainer: LinearLayout
 
     private var monthlyBudgetCents: Long? = null
 
@@ -150,6 +165,33 @@ class MainActivity : Activity() {
                     }
                 }
             })
+        })
+
+        page.addView(sectionHeading("Milkchain account"))
+        page.addView(card().apply {
+            addView(label(
+                "Read a public Biscuits account from a remote Milkchain node. Remote connections require HTTPS.",
+                13,
+                0xFF5B685F.toInt()
+            ).apply { setPadding(0, 0, 0, dp(10)) })
+            nodeUrlInput = field("HTTPS Milkchain node URL")
+            nodeUrlInput.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            nodeUrlInput.setText(settings.getString(KEY_NODE_URL, ""))
+            addView(nodeUrlInput)
+            accountAddressInput = field("Biscuits public address (64 hexadecimal characters)")
+            accountAddressInput.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+            accountAddressInput.setText(settings.getString(KEY_ACCOUNT_ADDRESS, ""))
+            addView(accountAddressInput)
+            accountLoadButton = actionButton("Load Milkchain account") { loadMilkchainAccount() }
+            addView(accountLoadButton)
+            accountBalanceValue = label("Account not loaded", 18, 0xFF244B35.toInt(), true).apply {
+                setPadding(0, dp(12), 0, dp(8))
+            }
+            addView(accountBalanceValue)
+            accountHistoryContainer = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+            }
+            addView(accountHistoryContainer)
         })
 
         page.addView(sectionHeading("Add a record"))
@@ -379,6 +421,131 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun loadMilkchainAccount() {
+        val nodeUrl = try {
+            validateNodeUrl(nodeUrlInput.text.toString().trim())
+        } catch (error: IllegalArgumentException) {
+            toast(error.message ?: "Enter a valid HTTPS node URL.")
+            return
+        }
+        val address = accountAddressInput.text.toString().trim()
+        if (!address.matches(Regex("^[0-9a-fA-F]{64}$"))) {
+            toast("Enter a 32-byte hexadecimal Biscuits public address.")
+            return
+        }
+        val normalizedAddress = address.lowercase(Locale.ROOT)
+        settings.edit()
+            .putString(KEY_NODE_URL, nodeUrl)
+            .putString(KEY_ACCOUNT_ADDRESS, normalizedAddress)
+            .apply()
+        accountLoadButton.isEnabled = false
+        accountBalanceValue.text = "Loading account…"
+        accountHistoryContainer.removeAllViews()
+
+        networkExecutor.execute {
+            try {
+                val balance = fetchJson("$nodeUrl/balance?address=$normalizedAddress")
+                val history = fetchJson("$nodeUrl/history?address=$normalizedAddress&limit=20")
+                val decimals = balance.getInt("decimals")
+                if (decimals !in 0..18 || balance.getString("address") != normalizedAddress) {
+                    throw IOException("The node returned invalid account metadata.")
+                }
+                val amount = TokenAmount.formatAtomicUnits(balance.get("balance").toString(), decimals)
+                val symbol = balance.optString("symbol", "Biscuits")
+                val total = history.getInt("total")
+                val events = history.getJSONArray("history")
+                val rows = mutableListOf<String>()
+                for (index in 0 until events.length()) {
+                    val event = events.getJSONObject(index)
+                    val eventAmount = TokenAmount.formatAtomicUnits(event.get("amount").toString(), decimals)
+                    val direction = event.optString("direction", event.optString("type", "activity"))
+                    val block = event.optLong("block_height", -1L)
+                    val fee = if (event.has("fee")) {
+                        " · fee ${TokenAmount.formatAtomicUnits(event.get("fee").toString(), decimals)} $symbol"
+                    } else ""
+                    rows.add("$direction  $eventAmount $symbol · block $block$fee")
+                }
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    accountLoadButton.isEnabled = true
+                    accountBalanceValue.text = "$amount $symbol"
+                    accountHistoryContainer.removeAllViews()
+                    accountHistoryContainer.addView(label(
+                        "Recent activity ($total total records; showing ${rows.size})",
+                        13,
+                        0xFF5B685F.toInt(),
+                        true
+                    ).apply { setPadding(0, dp(8), 0, dp(6)) })
+                    if (rows.isEmpty()) {
+                        accountHistoryContainer.addView(label("No account activity returned.", 13, 0xFF5B685F.toInt()))
+                    } else {
+                        rows.forEach { row ->
+                            accountHistoryContainer.addView(label(row, 13, 0xFF26352B.toInt()).apply {
+                                setPadding(0, dp(6), 0, dp(6))
+                            })
+                        }
+                    }
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    accountLoadButton.isEnabled = true
+                    accountBalanceValue.text = "Account unavailable"
+                    accountHistoryContainer.removeAllViews()
+                    toast(error.message ?: "Could not load the Milkchain account.")
+                }
+            }
+        }
+    }
+
+    private fun validateNodeUrl(raw: String): String {
+        val uri = Uri.parse(raw)
+        if (uri.scheme != "https" || uri.host.isNullOrBlank()
+            || uri.encodedAuthority?.contains('@') == true
+            || uri.encodedPath !in listOf("", "/")
+            || uri.encodedQuery != null || uri.encodedFragment != null
+            || uri.port == 0 || uri.port > 65535
+        ) {
+            throw IllegalArgumentException("Remote Milkchain nodes must use a base HTTPS URL without credentials or a path.")
+        }
+        return raw.trimEnd('/')
+    }
+
+    private fun fetchJson(address: String): JSONObject {
+        val connection = URL(address).openConnection() as HttpURLConnection
+        connection.requestMethod = "GET"
+        connection.instanceFollowRedirects = false
+        connection.connectTimeout = 8_000
+        connection.readTimeout = 8_000
+        connection.setRequestProperty("Accept", "application/json")
+        try {
+            val status = connection.responseCode
+            if (status !in 200..299) throw IOException("Milkchain node returned HTTP $status.")
+            val output = ByteArrayOutputStream()
+            connection.inputStream.use { input ->
+                val buffer = ByteArray(8_192)
+                var total = 0
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    total += count
+                    if (total > MAX_NODE_RESPONSE_BYTES) {
+                        throw IOException("Milkchain response exceeds the 1 MB limit.")
+                    }
+                    output.write(buffer, 0, count)
+                }
+            }
+            return JSONObject(String(output.toByteArray(), StandardCharsets.UTF_8))
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    override fun onDestroy() {
+        networkExecutor.shutdownNow()
+        super.onDestroy()
+    }
+
     private fun sectionHeading(text: String) =
         label(text, 19, 0xFF26352B.toInt(), true).apply {
             setPadding(dp(2), dp(22), dp(2), dp(10))
@@ -439,5 +606,8 @@ class MainActivity : Activity() {
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     companion object {
+        private const val KEY_NODE_URL = "milkchain_node_url"
+        private const val KEY_ACCOUNT_ADDRESS = "milkchain_account_address"
+        private const val MAX_NODE_RESPONSE_BYTES = 1_000_000
     }
 }
