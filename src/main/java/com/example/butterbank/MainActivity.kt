@@ -37,9 +37,9 @@ import java.util.concurrent.Executors
 /**
  * Offline-first Butter Bank prototype.
  *
- * This screen combines a local personal-finance ledger with a read-only
- * public Milkchain account viewer. It does not create a bank account, hold
- * deposits, issue credit, or connect to external payment rails.
+ * This screen combines a local personal-finance ledger, an encrypted local
+ * Ed25519 wallet, and a read-only public Milkchain account viewer. It does not
+ * hold deposits, issue credit, or connect to external payment rails.
  */
 class MainActivity : Activity() {
     private val ledgerStore by lazy { LedgerStore(this) }
