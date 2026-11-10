@@ -248,9 +248,14 @@ class ConsensusEngine:
                     "validators", "activation_height", "chain_height"
                 }:
                     raise ValueError("validator activation callback returned an invalid result")
-                replacement = (
-                    self.on_validator_set() if self.on_validator_set is not None else None
-                )
+                replacement = None
+                if self.on_validator_set is not None:
+                    try:
+                        replacement = self.on_validator_set()
+                    except Exception:
+                        # Finality is durable; remain an observer if new signer
+                        # state cannot yet be opened safely. The sync loop retries.
+                        replacement = None
                 self.activate_validator_set(
                     activation["validators"], replacement,
                     activation["activation_height"], activation["chain_height"],
