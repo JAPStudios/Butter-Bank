@@ -24,7 +24,7 @@ class ConsensusEngine:
     def __init__(
         self, signer: ConsensusSigner | None, block_validator, on_finalized=None,
         *, validators=None, chain_id=None, initial_height=None,
-        validator_activation_height=1,
+        validator_activation_height=1, on_validator_set=None,
     ):
         if signer is not None and not isinstance(signer, ConsensusSigner):
             raise TypeError("signer must be a ConsensusSigner or None")
@@ -54,6 +54,9 @@ class ConsensusEngine:
         if on_finalized is not None and not callable(on_finalized):
             raise TypeError("on_finalized must be callable")
         self.on_finalized = on_finalized
+        if on_validator_set is not None and not callable(on_validator_set):
+            raise TypeError("on_validator_set must be callable")
+        self.on_validator_set = on_validator_set
         self.round = signer.current_round if signer is not None else 0
         self.proposals = {}
         self.proposal_metadata = {}
@@ -242,11 +245,14 @@ class ConsensusEngine:
                 self._height += 1
             if activation is not None:
                 if not isinstance(activation, dict) or set(activation) != {
-                    "validators", "signer", "activation_height", "chain_height"
+                    "validators", "activation_height", "chain_height"
                 }:
                     raise ValueError("validator activation callback returned an invalid result")
+                replacement = (
+                    self.on_validator_set() if self.on_validator_set is not None else None
+                )
                 self.activate_validator_set(
-                    activation["validators"], activation["signer"],
+                    activation["validators"], replacement,
                     activation["activation_height"], activation["chain_height"],
                 )
             self.finalized[result["height"]] = result
