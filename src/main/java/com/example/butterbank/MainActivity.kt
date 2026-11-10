@@ -660,6 +660,7 @@ class MainActivity : Activity() {
             try {
                 val balance = fetchJson("$nodeUrl/balance?address=$normalizedAddress")
                 val history = fetchJson("$nodeUrl/history?address=$normalizedAddress&limit=20")
+                val mempool = fetchJson("$nodeUrl/mempool?address=$normalizedAddress")
                 val decimals = balance.getInt("decimals")
                 if (decimals !in 0..18 || balance.getString("address") != normalizedAddress) {
                     throw IOException("The node returned invalid account metadata.")
@@ -668,6 +669,16 @@ class MainActivity : Activity() {
                 val symbol = balance.optString("symbol", "Biscuits")
                 val total = history.getInt("total")
                 val events = history.getJSONArray("history")
+                val pending = mempool.getJSONArray("transactions")
+                val pendingRows = mutableListOf<String>()
+                for (index in 0 until pending.length()) {
+                    val transaction = pending.getJSONObject(index)
+                    if (transaction.optString("sender") != normalizedAddress) continue
+                    val pendingAmount = TokenAmount.formatAtomicUnits(transaction.get("amount").toString(), decimals)
+                    val recipient = transaction.optString("recipient")
+                    val nonce = transaction.get("nonce").toString()
+                    pendingRows.add("Pending · $pendingAmount $symbol to $recipient · nonce $nonce")
+                }
                 val rows = mutableListOf<String>()
                 for (index in 0 until events.length()) {
                     val event = events.getJSONObject(index)
@@ -685,13 +696,28 @@ class MainActivity : Activity() {
                     accountBalanceValue.text = "$amount $symbol"
                     accountHistoryContainer.removeAllViews()
                     accountHistoryContainer.addView(label(
-                        "Recent activity ($total total records; showing ${rows.size})",
+                        "Pending outgoing transfers (${pendingRows.size})",
                         13,
                         0xFF5B685F.toInt(),
                         true
                     ).apply { setPadding(0, dp(8), 0, dp(6)) })
+                    if (pendingRows.isEmpty()) {
+                        accountHistoryContainer.addView(label("No pending outgoing transfers.", 13, 0xFF5B685F.toInt()))
+                    } else {
+                        pendingRows.forEach { row ->
+                            accountHistoryContainer.addView(label(row, 13, 0xFF805B1A.toInt()).apply {
+                                setPadding(0, dp(6), 0, dp(6))
+                            })
+                        }
+                    }
+                    accountHistoryContainer.addView(label(
+                        "Confirmed activity ($total total records; showing ${rows.size})",
+                        13,
+                        0xFF5B685F.toInt(),
+                        true
+                    ).apply { setPadding(0, dp(12), 0, dp(6)) })
                     if (rows.isEmpty()) {
-                        accountHistoryContainer.addView(label("No account activity returned.", 13, 0xFF5B685F.toInt()))
+                        accountHistoryContainer.addView(label("No confirmed account activity returned.", 13, 0xFF5B685F.toInt()))
                     } else {
                         rows.forEach { row ->
                             accountHistoryContainer.addView(label(row, 13, 0xFF26352B.toInt()).apply {
