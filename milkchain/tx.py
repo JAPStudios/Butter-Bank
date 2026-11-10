@@ -1,10 +1,30 @@
 #!/usr/bin/env python3
 """Sign and submit a Milkchain transaction."""
 import argparse,json,urllib.request,urllib.error
+from urllib.parse import urlparse
 from pathlib import Path
 from wallet import read_wallet
 
 MAX_NODE_RESPONSE_BYTES = 4 * 1024 * 1024
+
+
+def validate_node_url(value):
+    """Require HTTPS for remote nodes; permit plain HTTP only on loopback."""
+    if not isinstance(value, str):
+        raise ValueError("node URL must be a string")
+    parsed = urlparse(value)
+    if (parsed.scheme not in ("http", "https") or not parsed.hostname
+            or parsed.username or parsed.password or parsed.path not in ("", "/")
+            or parsed.query or parsed.fragment):
+        raise ValueError("node must be a base HTTP(S) URL without credentials, path, query, or fragment")
+    try:
+        parsed.port
+    except ValueError as exc:
+        raise ValueError("node URL has an invalid port") from exc
+    if parsed.scheme != "https" and parsed.hostname not in ("127.0.0.1", "localhost", "::1"):
+        raise ValueError("remote wallet nodes must use HTTPS")
+    return value.rstrip("/")
+
 
 
 def read_limited_response(response, max_bytes=MAX_NODE_RESPONSE_BYTES):
@@ -50,7 +70,8 @@ def main():
         key, public_hex = read_wallet(a.wallet)
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
         p.error(f'invalid wallet file: {exc}')
-    node=a.node.rstrip('/')
+    try: node=validate_node_url(a.node)
+    except ValueError as e: p.error(str(e))
     try:
         status=get_json(node+'/status')
         balances=get_json(node+'/balances')
