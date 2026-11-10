@@ -249,15 +249,12 @@ def main():
         )
     chain = BFTChain(cfg, args.data or f"data-{cfg.get('port', 8333)}.json")
     key = load_validator_key(cfg["validator_private_key_file"])
-    signer = ConsensusSigner(
-        key, chain.id, chain.validators,
-        cfg.get("validator_state_file", f"data-{cfg.get('port', 8333)}.consensus.json"),
-        initial_height=len(chain.blocks),
+    base_state_path = cfg.get(
+        "validator_state_file", f"data-{cfg.get('port', 8333)}.consensus.json"
     )
-    if signer.height < len(chain.blocks):
-        signer.catch_up(chain.blocks[signer.height:])
-    if signer.height != len(chain.blocks):
-        raise SystemExit("Validator signer height does not match finalized chain height; refusing to sign.")
+    initial_activation = build_validator_activation(key, chain, base_state_path)
+    engine_ref = {}
+
     def persist_finalized(result):
         ok, message = chain.accept_finalized_block(
             result["block"], result["round"], result["commit_votes"],
@@ -265,10 +262,28 @@ def main():
         )
         if not ok:
             raise RuntimeError(message)
+        engine = engine_ref.get("engine")
+        if engine is not None and (
+            engine.validator_set_hash != chain.validators_hash
+            or engine.validator_activation_height != chain.validator_activation_height
+        ):
+            return build_validator_activation(key, chain, base_state_path)
+        return None
 
     engine = ConsensusEngine(
-        signer, chain.validate_proposal_block, on_finalized=persist_finalized
+        initial_activation["signer"],
+        chain.validate_proposal_block,
+        on_finalized=persist_finalized,
+        validators=chain.validators,
+        chain_id=chain.id,
+        initial_height=len(chain.blocks),
+        validator_activation_height=chain.validator_activation_height,
     )
+    engine_ref["engine"] = engine
+
+    def recover_synced_validator_set():
+        return build_validator_activation(key, chain, base_state_path)
+
     try:
         consensus_server = ConsensusHTTPServer(
             engine,
@@ -283,7 +298,8 @@ def main():
             tls_peer_fingerprints=cfg.get("consensus_tls_peer_fingerprints", []),
         )
     except Exception:
-        signer.close()
+        if engine.signer is not None:
+            engine.signer.close()
         raise
     BFTAPI.chain = chain
     BFTAPI.peers = chain.peers
@@ -296,7 +312,8 @@ def main():
         )
     except Exception:
         consensus_server.server.server_close()
-        signer.close()
+        if engine.signer is not None:
+            engine.signer.close()
         raise
 
     consensus_thread = threading.Thread(
@@ -318,11 +335,11 @@ def main():
     peer_sync_stop = threading.Event()
     peer_sync_thread = threading.Thread(
         target=bft_peer_sync_loop,
-        args=(chain, engine, 10, peer_sync_stop),
+        args=(chain, engine, 10, peer_sync_stop, recover_synced_validator_set),
         daemon=True,
     )
     peer_sync_thread.start()
-    print(f"Biscuits BFT node on {cfg.get('host')}:{cfg.get('port')} "
+    print(f"Milkchain BFT node on {cfg.get('host')}:{cfg.get('port')} "
           f"| chain={chain.id} | height={len(chain.blocks)-1} "
           f"| validators={len(chain.validators)}")
     try:
@@ -337,7 +354,8 @@ def main():
         timeout_thread.join(timeout=5)
         peer_sync_thread.join(timeout=5)
         consensus_thread.join(timeout=5)
-        signer.close()
+        if engine.signer is not None:
+            engine.signer.close()
 
 
 if __name__ == "__main__":
