@@ -282,9 +282,7 @@ class ConsensusEngine:
     def receive_round_change(self, message):
         """Collect authenticated round-change messages; advance on >2/3 power.
 
-        A certificate advances the round without discarding a lock. A conflicting
-        proposal is accepted only with a verified valid-round prevote certificate
-        newer than the persisted lock; authorization is persisted before prevoting.
+        An observer tracks certified rounds without producing validator signatures.
         """
         if not verify_round_change(message, self.validators, self.chain_id):
             return None
@@ -302,17 +300,7 @@ class ConsensusEngine:
             return None
         if self.active:
             try:
-                if self.active:
-            self.round = self.signer.advance_round(certificate)
-        else:
-            if not isinstance(certificate, list) or not certificate:
-                raise ValueError("invalid round-change certificate")
-            target = certificate[0]["round"]
-            if not verify_round_change_certificate(
-                certificate, self.validators, self.chain_id, self.height, target
-            ):
-                raise ValueError("invalid round-change certificate")
-            self.round = target
+                self.round = self.signer.advance_round(certificate)
             except (ValueError, RuntimeError):
                 return None
         else:
@@ -331,7 +319,17 @@ class ConsensusEngine:
         """Advance only from a valid distributed certificate; never unlock locally."""
         if certificate is None:
             raise RuntimeError("a >2/3 signed round-change certificate is required")
-        self.round = self.signer.advance_round(certificate)
+        if self.active:
+            self.round = self.signer.advance_round(certificate)
+        else:
+            if not isinstance(certificate, list) or not certificate:
+                raise ValueError("invalid round-change certificate")
+            target = certificate[0].get("round")
+            if not verify_round_change_certificate(
+                certificate, self.validators, self.chain_id, self.height, target
+            ):
+                raise ValueError("invalid round-change certificate")
+            self.round = target
         self.proposals.clear()
         self.proposal_metadata.clear()
         self.votes.clear()
