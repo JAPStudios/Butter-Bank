@@ -167,9 +167,12 @@ def bft_peer_sync_loop(chain, engine, interval=10, stop_event=None, on_validator
                 LOGGER.warning("BFT peer synchronization failed for %s", peer, exc_info=True)
                 continue
         try:
-            if (engine.pending_validator_recovery
-                    or engine.validator_set_hash != chain.validators_hash
-                    or engine.validator_activation_height != chain.validator_activation_height):
+            if (hasattr(engine, "validator_set_hash") and (
+                    getattr(engine, "pending_validator_recovery", False)
+                    or engine.validator_set_hash != getattr(chain, "validators_hash", None)
+                    or engine.validator_activation_height != getattr(
+                        chain, "validator_activation_height", None
+                    ))):
                 activation = (
                     on_validator_set() if on_validator_set is not None else {
                         "validators": chain.validators, "signer": None,
@@ -232,7 +235,7 @@ def bft_round_timeout_loop(consensus_server, initial_timeout=10.0,
             timeout = float(initial_timeout)
             continue
         pending = (engine.signer.pending_round_change_targets
-                   if engine.active else ())
+                   if getattr(engine, "active", True) else ())
         target_round = min(pending) if pending else engine.round + 1
         try:
             consensus_server.publish_round_change(target_round)
