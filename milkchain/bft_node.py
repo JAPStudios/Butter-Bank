@@ -119,6 +119,8 @@ def build_validator_activation(key, chain, base_state_path):
             initial_height=chain.validator_activation_height,
         )
         try:
+            if signer.height < chain.validator_activation_height:
+                raise ValueError("validator signing state predates its active-set activation")
             if signer.height < len(chain.blocks):
                 signer.catch_up(chain.blocks[signer.height:])
             if signer.height != len(chain.blocks):
