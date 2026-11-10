@@ -1,6 +1,6 @@
 package com.example.butterbank
 
-import android.util.Base64
+import org.bouncycastle.util.encoders.Base64
 import org.bouncycastle.crypto.generators.SCrypt
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
 import org.json.JSONObject
@@ -61,9 +61,9 @@ object WalletBackupCodec {
             put("version", VERSION)
             put("kdf", "scrypt")
             put("cipher", "AES-256-GCM")
-            put("salt", Base64.encodeToString(salt, Base64.NO_WRAP))
-            put("nonce", Base64.encodeToString(nonce, Base64.NO_WRAP))
-            put("ciphertext", Base64.encodeToString(ciphertext, Base64.NO_WRAP))
+            put("salt", Base64.toBase64String(salt))
+            put("nonce", Base64.toBase64String(nonce))
+            put("ciphertext", Base64.toBase64String(ciphertext))
             put("public_key", public)
         }.toString()
     }
@@ -80,9 +80,9 @@ object WalletBackupCodec {
         }
         val public = json.getString("public_key").lowercase()
         require(public.matches(Regex("^[0-9a-f]{64}$"))) { "Wallet public key is malformed" }
-        val salt = Base64.decode(json.getString("salt"), Base64.NO_WRAP)
-        val nonce = Base64.decode(json.getString("nonce"), Base64.NO_WRAP)
-        val ciphertext = Base64.decode(json.getString("ciphertext"), Base64.NO_WRAP)
+        val salt = Base64.decode(json.getString("salt"))
+        val nonce = Base64.decode(json.getString("nonce"))
+        val ciphertext = Base64.decode(json.getString("ciphertext"))
         require(salt.size == SALT_BYTES && nonce.size == NONCE_BYTES && ciphertext.size == 48) {
             "Wallet backup encryption fields have invalid lengths"
         }
