@@ -1,5 +1,7 @@
 # Butter Bank
 
+Butter Bank is a public financial service owned by HeLLP. This repository contains software development components for that service.
+
 Butter Bank is a development repository with three distinct components:
 
 - **Funding website:** the static public project page in `index.html`, mirrored as `funding.html`.
