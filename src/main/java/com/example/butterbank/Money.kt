@@ -83,4 +83,19 @@ object TokenAmount {
         val amount = BigInteger(raw)
         return BigDecimal(amount, decimals).stripTrailingZeros().toPlainString()
     }
+
+    fun parsePositiveAtomicUnits(raw: String, decimals: Int): BigInteger? {
+        if (decimals !in 0..18) return null
+        return try {
+            val amount = BigDecimal(raw.trim())
+            if (amount <= BigDecimal.ZERO) null
+            else amount.setScale(decimals, RoundingMode.UNNECESSARY)
+                .movePointRight(decimals)
+                .toBigIntegerExact()
+        } catch (_: NumberFormatException) {
+            null
+        } catch (_: ArithmeticException) {
+            null
+        }
+    }
 }
