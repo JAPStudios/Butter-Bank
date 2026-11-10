@@ -144,6 +144,38 @@ def verify_transition_certificate(
         return False
 
 
+
+
+def validator_set_at_height(
+    transitions: Sequence[Mapping[str, object]],
+    initial_validators: Sequence[Mapping[str, object]],
+    expected_chain_id: str,
+    height: int,
+) -> list[dict[str, object]]:
+    """Resolve the validator set active at a finalized-chain height.
+
+    A transition authorized at activation_height is active for that height;
+    the block immediately before it remains certified by the previous set.
+    Invalid transition history fails closed rather than selecting a fallback.
+    """
+    if not isinstance(height, int) or isinstance(height, bool) or height < 1:
+        raise ValueError("height must be a positive integer")
+    if not verify_transition_history(transitions, initial_validators, expected_chain_id):
+        raise ValueError("validator transition history is invalid")
+    active = [
+        {"public_key": key, "voting_power": power}
+        for key, power in normalize_validator_set(initial_validators).items()
+    ]
+    for certificate in transitions:
+        if certificate["activation_height"] > height:
+            break
+        active = [
+            {"public_key": key, "voting_power": power}
+            for key, power in normalize_validator_set(certificate["next_validators"]).items()
+        ]
+    return active
+
+
 def verify_transition_history(
     transitions: Sequence[Mapping[str, object]],
     initial_validators: Sequence[Mapping[str, object]],
