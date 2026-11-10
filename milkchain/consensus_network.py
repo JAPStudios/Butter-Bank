@@ -291,6 +291,11 @@ class ConsensusHTTPServer:
                 if key_mode & 0o077:
                     self.server.server_close()
                     raise ValueError("consensus TLS private key must have permissions 0600")
+                if tls_client_pair:
+                    client_key_mode = stat.S_IMODE(os.stat(tls_client_keyfile).st_mode)
+                    if client_key_mode & 0o077:
+                        self.server.server_close()
+                        raise ValueError("consensus TLS client private key must have permissions 0600")
             try:
                 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
                 context.minimum_version = ssl.TLSVersion.TLSv1_2
