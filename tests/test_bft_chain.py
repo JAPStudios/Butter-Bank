@@ -4,6 +4,7 @@ import unittest
 import threading
 import json
 import urllib.request
+from unittest.mock import patch
 from http.server import ThreadingHTTPServer
 import time
 from pathlib import Path
@@ -12,7 +13,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from admission import issuer_set_hash, sign_admission
 from bft_chain import BFTChain
-from node import bhash, signing_bytes
+from node import bhash, signing_bytes, synchronize_peer
 from consensus import make_proposal, make_round_change, select_proposer
 from consensus_network import ConsensusHTTPServer
 from engine import ConsensusEngine
@@ -268,6 +269,52 @@ class BFTChainTests(unittest.TestCase):
 
             removed = build_validator_activation(self.validator_keys[0], chain, base)
             self.assertIsNone(removed["signer"])
+
+    def test_peer_sync_accepts_a_longer_chain_with_a_verified_new_validator_set(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = BFTChain(self.cfg, Path(directory) / "source.json")
+            target = BFTChain(self.cfg, Path(directory) / "target.json")
+            next_keys = [Ed25519PrivateKey.generate() for _ in range(4)]
+            next_set = [
+                {"public_key": key.public_key().public_bytes_raw().hex(),
+                 "voting_power": 1}
+                for key in next_keys
+            ]
+            certificate = make_transition_certificate(
+                self.validator_keys[:3], self.chain_id, 2,
+                source.initial_validators, next_set,
+            )
+            proposer = select_proposer(source.validators, 1, 0)
+            block = source.build_proposal(proposer, validator_transition=certificate)
+            votes = [
+                make_vote(key, self.chain_id, 1, 0, "precommit", block["hash"],
+                          validator_set_hash(source.initial_validators))
+                for key in self.validator_keys[:3]
+            ]
+            accepted, message = source.accept_finalized_block(block, 0, votes)
+            self.assertTrue(accepted, message)
+
+            status = {
+                "chain_id": source.id,
+                "genesis_hash": source.blocks[0]["hash"],
+                "difficulty": source.diff,
+                "block_reward": source.reward,
+                "consensus": "bft",
+                "validator_set_hash": source.validators_hash,
+                "height": len(source.blocks) - 1,
+            }
+
+            def fake_get(url):
+                if url.endswith("/status"):
+                    return status
+                if "/chain?" in url:
+                    return {"start": 0, "chain": source.blocks}
+                raise AssertionError(url)
+
+            with patch("node.get", side_effect=fake_get):
+                self.assertTrue(synchronize_peer(target, "http://127.0.0.1:8333"))
+            self.assertEqual(target.blocks, source.blocks)
+            self.assertEqual(target.validators, source.validators)
 
     def test_bft_chain_rejects_reward_redirection_away_from_selected_proposer(self):
         with tempfile.TemporaryDirectory() as directory:
