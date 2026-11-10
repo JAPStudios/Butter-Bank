@@ -17,7 +17,10 @@ from consensus import make_proposal, make_round_change, select_proposer
 from consensus_network import ConsensusHTTPServer
 from engine import ConsensusEngine
 from signer import ConsensusSigner
-from bft_node import BFTAPI, load_validator_key
+from bft_node import (
+    BFTAPI, load_validator_key, build_validator_activation,
+    validator_state_path,
+)
 from keygen import generate_keypair
 from consensus import make_vote, validator_set_hash
 from validator_transitions import make_transition_certificate
@@ -229,6 +232,42 @@ class BFTChainTests(unittest.TestCase):
             proposer = select_proposer(chain.validators, 2, 0)
             block = chain.build_proposal(proposer, validator_transition=certificate)
             self.assertIsNone(chain.validate_proposal_block(block))
+
+    def test_node_recovers_only_the_active_validator_signing_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            chain = BFTChain(self.cfg, Path(directory) / "activation-chain.json")
+            next_keys = [Ed25519PrivateKey.generate() for _ in range(4)]
+            next_set = [
+                {"public_key": key.public_key().public_bytes_raw().hex(),
+                 "voting_power": 1}
+                for key in next_keys
+            ]
+            certificate = make_transition_certificate(
+                self.validator_keys[:3], self.chain_id, 2,
+                chain.initial_validators, next_set,
+            )
+            proposer = select_proposer(chain.validators, 1, 0)
+            block = chain.build_proposal(proposer, validator_transition=certificate)
+            votes = [
+                make_vote(key, self.chain_id, 1, 0, "precommit", block["hash"],
+                          validator_set_hash(chain.initial_validators))
+                for key in self.validator_keys[:3]
+            ]
+            accepted, message = chain.accept_finalized_block(block, 0, votes)
+            self.assertTrue(accepted, message)
+
+            base = Path(directory) / "validator-state.json"
+            active = build_validator_activation(next_keys[0], chain, base)
+            self.assertIsNotNone(active["signer"])
+            self.assertEqual(active["signer"].height, len(chain.blocks))
+            self.assertEqual(
+                active["signer"].validators_hash, chain.validators_hash
+            )
+            self.assertNotEqual(validator_state_path(base, chain), base)
+            active["signer"].close()
+
+            removed = build_validator_activation(self.validator_keys[0], chain, base)
+            self.assertIsNone(removed["signer"])
 
     def test_bft_chain_rejects_reward_redirection_away_from_selected_proposer(self):
         with tempfile.TemporaryDirectory() as directory:
