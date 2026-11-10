@@ -54,10 +54,11 @@ PYTHONPATH=milkchain python -m wallet create biscuits.wallet
 PYTHONPATH=milkchain python -m wallet address biscuits.wallet
 ```
 
-Older wallet files contain an unencrypted private key. They remain readable for compatibility but emit a warning. Encrypt an existing legacy wallet in place with:
+Older wallet files contain an unencrypted private key. They remain readable for compatibility but emit a warning. Encrypt an existing legacy wallet in place with the first command below. Rotate an encrypted wallet passphrase with the second command; it verifies the current passphrase before replacing the encrypted file:
 
 ```sh
 PYTHONPATH=milkchain python -m wallet encrypt old-wallet.json
+PYTHONPATH=milkchain python -m wallet change-passphrase biscuits.wallet
 ```
 
 Keep the passphrase separate from the wallet file. A forgotten passphrase cannot be recovered, and anyone who obtains both the wallet file and its passphrase can control its funds. This wallet format is development key storage, not a hardware wallet or audited custody system.
