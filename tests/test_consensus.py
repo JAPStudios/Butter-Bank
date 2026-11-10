@@ -728,6 +728,8 @@ class BFTPrimitiveTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             normalize_peer_fingerprints(["not-a-fingerprint"])
         with self.assertRaises(ValueError):
+            normalize_peer_fingerprints(["aa" * 30 + " aa "])
+        with self.assertRaises(ValueError):
             normalize_peer_fingerprints(["ab" * 32, "AB" * 32])
 
     @unittest.skipIf(os.name == "nt", "POSIX file-mode and symlink semantics")
