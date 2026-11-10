@@ -32,7 +32,9 @@ def normalize_peer_fingerprints(values):
         if not isinstance(value, str) or len(value) != 64:
             raise ValueError("each peer certificate fingerprint must be 64 hexadecimal characters")
         try:
-            bytes.fromhex(value)
+            decoded = bytes.fromhex(value)
+            if len(decoded) != 32:
+                raise ValueError("fingerprint must encode exactly 32 bytes")
         except ValueError as exc:
             raise ValueError("peer certificate fingerprints must be hexadecimal") from exc
         normalized.add(value.lower())
@@ -285,17 +287,18 @@ class ConsensusHTTPServer:
         if bool(tls_certfile) != bool(tls_keyfile):
             self.server.server_close()
             raise ValueError("both TLS certificate and private key are required")
-        if tls_certfile:
-            if hasattr(os, "getuid"):
+        if hasattr(os, "getuid"):
+            if tls_certfile:
                 key_mode = stat.S_IMODE(os.stat(tls_keyfile).st_mode)
                 if key_mode & 0o077:
                     self.server.server_close()
                     raise ValueError("consensus TLS private key must have permissions 0600")
-                if tls_client_pair:
-                    client_key_mode = stat.S_IMODE(os.stat(tls_client_keyfile).st_mode)
-                    if client_key_mode & 0o077:
-                        self.server.server_close()
-                        raise ValueError("consensus TLS client private key must have permissions 0600")
+            if tls_client_pair:
+                client_key_mode = stat.S_IMODE(os.stat(tls_client_keyfile).st_mode)
+                if client_key_mode & 0o077:
+                    self.server.server_close()
+                    raise ValueError("consensus TLS client private key must have permissions 0600")
+        if tls_certfile:
             try:
                 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
                 context.minimum_version = ssl.TLSVersion.TLSv1_2
