@@ -10,7 +10,7 @@ These are prototypes, not a production bank or production payment network. The A
 
 ## Android application
 
-The current offline ledger includes exact cents-based money parsing, recorded income and expense totals, a monthly spending limit, and local transaction history. Long-press a history row to delete a manually entered record. The app uses local preferences; the prototype does not yet encrypt those records or synchronize them across devices. Do not enter banking credentials or treat its displayed balance as available funds.
+The offline ledger includes exact cents-based money parsing, recorded income and expense totals, a monthly spending limit, and local transaction history. Long-press a history row to delete a manually entered record. Ledger records and the monthly limit are encrypted at rest with AES-256-GCM using a key held by Android Keystore. Existing plaintext local records are migrated to the encrypted format on first launch after this update; plaintext preferences are removed only after the encrypted copy has been committed successfully. If the encrypted data cannot be unlocked or authenticated, the app preserves the stored ciphertext and blocks writes rather than silently deleting records. Data remains on the device and is not synchronized across devices. Do not enter banking credentials or treat its displayed balance as available funds.
 
 Requirements: JDK 17, Android SDK Platform 35, and Gradle 8.9 or a compatible Android Studio installation.
 
@@ -42,7 +42,6 @@ Do not use this prototype for real funds or expose its node API to the public in
 ## Security and scope
 
 No component in this repository should be represented as a licensed bank, deposit-taking institution, production wallet, or audited payment network. Real banking and payment functionality requires defined product requirements, regulated-provider integrations where applicable, security engineering, and legal/compliance review.
-
 
 ## Milkchain BFT node
 
