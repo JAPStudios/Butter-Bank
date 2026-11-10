@@ -219,6 +219,10 @@ def main():
             port=int(cfg.get("consensus_port", 8334)),
             tls_certfile=cfg.get("consensus_tls_certfile"),
             tls_keyfile=cfg.get("consensus_tls_keyfile"),
+            tls_ca_file=cfg.get("consensus_tls_ca_file"),
+            tls_client_certfile=cfg.get("consensus_tls_client_certfile"),
+            tls_client_keyfile=cfg.get("consensus_tls_client_keyfile"),
+            tls_peer_fingerprints=cfg.get("consensus_tls_peer_fingerprints", []),
         )
     except Exception:
         signer.close()
