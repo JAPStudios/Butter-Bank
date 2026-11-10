@@ -37,9 +37,13 @@ class ConsensusEngine:
         self._lock = threading.RLock()
         self.signer = signer
         self.chain_id = signer.chain_id if signer is not None else chain_id
-        validator_map = normalize_validator_set(
-            validators if signer is None else signer.validators
+        validator_records = (
+            validators if signer is None else [
+                {"public_key": key, "voting_power": power}
+                for key, power in signer.validators.items()
+            ]
         )
+        validator_map = normalize_validator_set(validator_records)
         self.validator_power = validator_map
         self.validators = [
             {"public_key": key, "voting_power": power}
