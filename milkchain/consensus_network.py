@@ -114,6 +114,13 @@ class ConsensusHTTPServer:
         if bool(tls_client_certfile) != bool(tls_client_keyfile):
             raise ValueError("both TLS client certificate and private key are required")
         self.allowed_peer_fingerprints = normalize_peer_fingerprints(tls_peer_fingerprints)
+        remote_peers = [
+            peer for peer in self.peers
+            if urlparse(peer).scheme == "https"
+            and urlparse(peer).hostname not in ("127.0.0.1", "localhost", "::1")
+        ]
+        if remote_peers and not (tls_ca_file and tls_client_pair):
+            raise ValueError("remote HTTPS consensus peers require a trusted CA and a client certificate")
         remote_listener = host not in ("127.0.0.1", "localhost", "::1")
         if remote_listener and not (
             tls_certfile and tls_keyfile and tls_ca_file and tls_client_pair
