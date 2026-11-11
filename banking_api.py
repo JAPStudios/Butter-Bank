@@ -33,6 +33,8 @@ class BankingAPIHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        if self.close_connection:
+            self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
 
@@ -67,14 +69,19 @@ class BankingAPIHandler(BaseHTTPRequestHandler):
         try:
             operation()
         except AuthenticationError:
+            self.close_connection = True
             self._send_json(401, {"error": "unauthorized"})
         except AccountAccessDenied:
+            self.close_connection = True
             self._send_json(403, {"error": "forbidden"})
         except (InsufficientFunds, IdempotencyConflict):
+            self.close_connection = True
             self._send_json(409, {"error": "conflict"})
         except (LedgerError, ValueError, UnicodeDecodeError, json.JSONDecodeError):
+            self.close_connection = True
             self._send_json(400, {"error": "invalid_request"})
         except Exception:
+            self.close_connection = True
             self._send_json(500, {"error": "internal_error"})
 
     def do_GET(self):
