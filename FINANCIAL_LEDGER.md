@@ -1,421 +1,139 @@
-"""Exact, balanced financial-account ledger for Butter Bank.
+# Financial ledger
 
-Balances are recorded in integer minor units. This module does not claim that
-an entry is settled, insured, held in custody, or backed by an external bank.
-"""
-from __future__ import annotations
+## Purpose
 
-import hashlib
-import json
-import os
-import re
-import stat
-import sqlite3
-import threading
-import uuid
-from datetime import datetime, timezone
-from pathlib import Path
+`financial_ledger.py` is the local accounting foundation for Butter Bank. It provides a persistent SQLite double-entry journal with explicit currency precision, immutable postings, idempotency keys, owner-scoped account listing, and internal transfers.
 
+The journal records accounting entries. It does not prove that funds exist at an external institution, that a payment has settled, or that an account is insured or held in custody.
 
-_CURRENCY_CODE = re.compile(r"^[A-Z][A-Z0-9]{2,11}$")
-_MIN_INT64 = -(2**63)
-_MAX_INT64 = 2**63 - 1
+## Basic setup
 
+```python
+from financial_ledger import FinancialLedger
 
-class LedgerError(ValueError):
-    """Base class for rejected financial-ledger operations."""
+ledger = FinancialLedger("data/butter-bank.sqlite3")
+```
 
+The database parent directory is created when needed. On POSIX systems the database file is opened without following a symlink where the platform supports `O_NOFOLLOW`, checked as a regular file, and restricted to owner read/write permissions. SQLite uses WAL mode and full synchronous writes for file-backed databases.
 
-class IdempotencyConflict(LedgerError):
-    """An idempotency key was reused for different journal content."""
+Close the ledger when the owning process shuts down:
 
+```python
+ledger.close()
+```
 
-class InsufficientFunds(LedgerError):
-    """A posting would make a non-overdraft account negative."""
+The class also supports a context manager.
 
+## Currency precision
 
-class AccountAccessDenied(LedgerError):
-    """An authenticated account-owner reference did not match the account owner."""
+USD is registered with exponent 2 (cents); JPY is registered with exponent 0 (whole yen). Amounts are always signed integers in the currency's minor unit. Floating-point amounts are rejected.
 
+Register other currencies or assets only with an explicitly selected exponent and asset class:
 
-class FinancialLedger:
-    """SQLite-backed, multi-currency double-entry journal.
+```python
+ledger.register_currency("BISCUITS", 0, "crypto")
+```
 
-    USD uses cents (exponent 2); JPY uses whole yen (exponent 0). Other
-    currencies or assets must be registered with an explicit exponent.
-    Every journal transaction balances independently within one currency.
-    """
+The example above is only a syntax example. It does not establish the Biscuits denomination or issuance policy. Those monetary rules remain unspecified and must be set before real-value issuance.
 
-    def __init__(self, path):
-        self.path = str(path)
-        self._lock = threading.RLock()
-        if self.path != ":memory:":
-            database_path = Path(self.path)
-            database_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            if database_path.is_symlink():
-                raise LedgerError("ledger database must not be a symbolic link")
-            flags = os.O_CREAT | os.O_RDWR
-            if hasattr(os, "O_NOFOLLOW"):
-                flags |= os.O_NOFOLLOW
-            try:
-                descriptor = os.open(str(database_path), flags, 0o600)
-            except OSError as exc:
-                raise LedgerError("ledger database cannot be opened safely") from exc
-            try:
-                if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-                    raise LedgerError("ledger database must be a regular file")
-                if os.name == "posix":
-                    os.fchmod(descriptor, 0o600)
-            finally:
-                os.close(descriptor)
-        self._db = sqlite3.connect(
-            self.path, isolation_level=None, check_same_thread=False, timeout=30
-        )
-        self._db.row_factory = sqlite3.Row
-        self._db.execute("PRAGMA foreign_keys = ON")
-        self._db.execute("PRAGMA busy_timeout = 30000")
-        if self.path != ":memory:":
-            self._db.execute("PRAGMA journal_mode = WAL")
-            self._db.execute("PRAGMA synchronous = FULL")
-            if os.name == "posix":
-                os.chmod(self.path, 0o600)
-        self._create_schema()
-        self.register_currency("USD", 2, "fiat")
-        self.register_currency("JPY", 0, "fiat")
+## Accounts and ownership
 
-    def _create_schema(self):
-        with self._lock:
-            self._db.executescript("""
-                CREATE TABLE IF NOT EXISTS currencies (
-                    code TEXT PRIMARY KEY,
-                    minor_unit_exponent INTEGER NOT NULL
-                        CHECK(minor_unit_exponent BETWEEN 0 AND 9),
-                    asset_class TEXT NOT NULL
-                        CHECK(asset_class IN ('fiat', 'crypto'))
-                );
-                CREATE TABLE IF NOT EXISTS accounts (
-                    account_id TEXT PRIMARY KEY,
-                    owner_ref TEXT NOT NULL,
-                    currency_code TEXT NOT NULL REFERENCES currencies(code),
-                    account_type TEXT NOT NULL,
-                    allow_negative INTEGER NOT NULL DEFAULT 0
-                        CHECK(allow_negative IN (0, 1)),
-                    created_at TEXT NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS accounts_owner_idx
-                    ON accounts(owner_ref, currency_code);
-                CREATE TABLE IF NOT EXISTS journal_transactions (
-                    transaction_id TEXT PRIMARY KEY,
-                    idempotency_key TEXT NOT NULL UNIQUE,
-                    content_hash TEXT NOT NULL,
-                    description TEXT NOT NULL,
-                    created_at TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS journal_entries (
-                    entry_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    transaction_id TEXT NOT NULL
-                        REFERENCES journal_transactions(transaction_id),
-                    account_id TEXT NOT NULL REFERENCES accounts(account_id),
-                    amount_minor INTEGER NOT NULL CHECK(amount_minor <> 0),
-                    UNIQUE(transaction_id, account_id)
-                );
-                CREATE INDEX IF NOT EXISTS journal_entries_account_idx
-                    ON journal_entries(account_id, entry_id);
-            """)
+```python
+account_id = ledger.create_account(
+    owner_ref="trusted-principal-reference",
+    currency_code="USD",
+    account_type="deposit",
+)
+accounts = ledger.accounts_for_owner("trusted-principal-reference")
+```
 
-    @staticmethod
-    def _text(value, field):
-        if not isinstance(value, str) or not value.strip():
-            raise LedgerError(field + " must be a non-empty string")
-        return value.strip()
+The owner reference is an opaque value used to associate ledger accounts with the JaMail account that owns them. The ledger does not authenticate that value. It must be derived from a verified JaMail session or credential; a client must never be allowed to choose an owner reference in a request.
 
-    def register_currency(self, code, minor_unit_exponent, asset_class):
-        code = self._text(code, "currency code").upper()
-        if not _CURRENCY_CODE.fullmatch(code):
-            raise LedgerError("currency code must be 3 to 12 uppercase letters or digits")
-        if (not isinstance(minor_unit_exponent, int)
-                or isinstance(minor_unit_exponent, bool)
-                or not 0 <= minor_unit_exponent <= 9):
-            raise LedgerError("minor-unit exponent must be an integer from 0 to 9")
-        if asset_class not in ("fiat", "crypto"):
-            raise LedgerError("asset class must be fiat or crypto")
-        with self._lock:
-            self._db.execute(
-                "INSERT INTO currencies(code, minor_unit_exponent, asset_class) "
-                "VALUES (?, ?, ?) ON CONFLICT(code) DO NOTHING",
-                (code, minor_unit_exponent, asset_class),
-            )
-            row = self._db.execute(
-                "SELECT minor_unit_exponent, asset_class FROM currencies WHERE code=?",
-                (code,),
-            ).fetchone()
-            if (row["minor_unit_exponent"], row["asset_class"]) != (
-                minor_unit_exponent, asset_class
-            ):
-                raise LedgerError("currency is already registered with different metadata")
-        return code
+## Internal transfers
 
-    def currency(self, code):
-        with self._lock:
-            row = self._db.execute(
-                "SELECT code, minor_unit_exponent, asset_class FROM currencies WHERE code=?",
-                (self._text(code, "currency code").upper(),),
-            ).fetchone()
-            if row is None:
-                raise LedgerError("currency is not registered")
-            return dict(row)
+```python
+transaction_id = ledger.transfer(
+    authenticated_owner_ref="trusted-principal-reference",
+    source_account_id="source-account-id",
+    destination_account_id="destination-account-id",
+    amount_minor=1250,
+    idempotency_key="unique-request-id",
+    description="Internal transfer",
+)
+```
 
-    def currencies(self):
-        """Return the registered currency and asset precision catalog."""
-        with self._lock:
-            rows = self._db.execute(
-                "SELECT code, minor_unit_exponent, asset_class "
-                "FROM currencies ORDER BY code"
-            ).fetchall()
-            return [dict(row) for row in rows]
+The caller must pass the owner reference returned by the trusted credential-validation layer. The source account must belong to that JaMail account. The destination may belong to a different account owner. Both accounts must use the same currency. The journal posts the debit and credit atomically, rejects overdrafts by default, and returns the original transaction ID when the same idempotent request is retried.
 
-    def create_account(
-        self, owner_ref, currency_code, account_type="deposit",
-        allow_negative=False, account_id=None,
-    ):
-        owner_ref = self._text(owner_ref, "owner reference")
-        account_type = self._text(account_type, "account type")
-        currency = self._text(currency_code, "currency code").upper()
-        if not isinstance(allow_negative, bool):
-            raise LedgerError("allow_negative must be a boolean")
-        self.currency(currency)
-        account_id = account_id or str(uuid.uuid4())
-        account_id = self._text(account_id, "account ID")
-        created_at = datetime.now(timezone.utc).isoformat()
-        with self._lock:
-            self._db.execute(
-                "INSERT INTO accounts(account_id, owner_ref, currency_code, "
-                "account_type, allow_negative, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (account_id, owner_ref, currency, account_type,
-                 int(allow_negative), created_at),
-            )
-        return account_id
+The idempotency key must be unique for each distinct operation. Reusing a key for different journal content is rejected.
 
-    def account(self, account_id):
-        with self._lock:
-            row = self._db.execute(
-                "SELECT account_id, owner_ref, currency_code, account_type, "
-                "allow_negative, created_at FROM accounts WHERE account_id=?",
-                (self._text(account_id, "account ID"),),
-            ).fetchone()
-            if row is None:
-                raise LedgerError("account does not exist")
-            result = dict(row)
-            result["allow_negative"] = bool(result["allow_negative"])
-            return result
+## Direct journal posting
 
-    def account_for_owner(self, authenticated_owner_ref, account_id):
-        """Read account metadata only when the authenticated owner matches."""
-        owner_ref = self._text(authenticated_owner_ref, "authenticated owner reference")
-        with self._lock:
-            account = self.account(account_id)
-            if account["owner_ref"] != owner_ref:
-                raise AccountAccessDenied("account is not owned by the authenticated account owner")
-            return account
+`post(idempotency_key, description, entries)` is the lower-level accounting operation. Each entry is a pair of account ID and signed integer minor-unit amount. At least two accounts are required, every account may appear only once, all entries must use the same currency, and the signed amounts must sum to zero.
 
-    def accounts_for_owner(self, owner_ref):
-        """Return account metadata for one authenticated owner reference."""
-        owner_ref = self._text(owner_ref, "owner reference")
-        with self._lock:
-            rows = self._db.execute(
-                "SELECT account_id, owner_ref, currency_code, account_type, "
-                "allow_negative, created_at FROM accounts "
-                "WHERE owner_ref=? ORDER BY created_at, account_id",
-                (owner_ref,),
-            ).fetchall()
-            result = []
-            for row in rows:
-                item = dict(row)
-                item["allow_negative"] = bool(item["allow_negative"])
-                result.append(item)
-            return result
+Direct posting is an internal accounting primitive. It must not be exposed directly to an unauthenticated client or used to represent an external deposit, withdrawal, card authorization, or payment settlement without a verified external event and a controlled posting policy.
 
-    def _balance_minor_unlocked(self, account_id):
-        rows = self._db.execute(
-            "SELECT amount_minor FROM journal_entries WHERE account_id=?",
-            (account_id,),
-        ).fetchall()
-        balance = sum(row["amount_minor"] for row in rows)
-        if not _MIN_INT64 <= balance <= _MAX_INT64:
-            raise LedgerError("account balance exceeds the supported integer range")
-        return balance
+## Current boundaries
 
-    def balance_minor(self, account_id):
-        with self._lock:
-            self.account(account_id)
-            return self._balance_minor_unlocked(account_id)
+This module does not yet provide:
 
-    @staticmethod
-    def _canonical_posting(description, currency, entries):
-        return json.dumps(
-            {"description": description, "currency": currency,
-             "entries": sorted(entries)},
-            sort_keys=True, separators=(",", ":"),
-        )
+- Customer authentication or JaMail session validation.
+- A public HTTP/API service, customer onboarding, account recovery, or permissions administration.
+- External deposits, withdrawals, card issuing, ACH, wire, instant payment, merchant settlement, or reconciliation.
+- Credit underwriting, lending, interest accrual, savings yields, fees, payroll, tax reporting, investment brokerage, or government-benefit integrations.
+- Encryption of the SQLite database at rest, key management for customer identity, replicated storage, or production disaster recovery.
 
-    def post(self, idempotency_key, description, entries):
-        """Commit one balanced journal transaction.
+Do not place real customer funds or production credentials in this development ledger. Those capabilities require separate designs, provider integrations, regulatory authorization, security review, and operational controls.
 
-        entries is an iterable of (account_id, signed_minor_units).
-        Positive values increase an account; negative values decrease it.
-        """
-        key = self._text(idempotency_key, "idempotency key")
-        description = self._text(description, "description")
-        if isinstance(entries, (str, bytes)):
-            raise LedgerError("entries must be an iterable of account postings")
-        try:
-            postings = list(entries)
-        except TypeError as exc:
-            raise LedgerError("entries must be iterable") from exc
-        if len(postings) < 2:
-            raise LedgerError("a journal transaction requires at least two entries")
+## Authenticated application-service boundary
 
-        normalized = []
-        for item in postings:
-            if not isinstance(item, (tuple, list)) or len(item) != 2:
-                raise LedgerError("each entry must contain an account ID and amount")
-            account_id, amount = item
-            account_id = self._text(account_id, "account ID")
-            if (not isinstance(amount, int) or isinstance(amount, bool)
-                    or amount == 0 or not -(2**63) <= amount < 2**63):
-                raise LedgerError("entry amount must be a non-zero signed integer")
-            normalized.append((account_id, amount))
-        if len({account_id for account_id, _ in normalized}) != len(normalized):
-            raise LedgerError("each account may appear only once per journal transaction")
-        if sum(amount for _, amount in normalized) != 0:
-            raise LedgerError("journal transaction must balance to zero")
+`banking_service.py` exposes account opening, account listing, owner-scoped statements, and internal transfers through an injected identity resolver:
 
-        with self._lock:
-            self._db.execute("BEGIN IMMEDIATE")
-            try:
-                account_rows = []
-                for account_id, amount in normalized:
-                    row = self._db.execute(
-                        "SELECT account_id, currency_code, allow_negative FROM accounts "
-                        "WHERE account_id=?", (account_id,),
-                    ).fetchone()
-                    if row is None:
-                        raise LedgerError("account does not exist: " + account_id)
-                    account_rows.append((row, amount))
-                currencies = {row["currency_code"] for row, _ in account_rows}
-                if len(currencies) != 1:
-                    raise LedgerError("one journal transaction cannot mix currencies")
-                currency = next(iter(currencies))
-                canonical = self._canonical_posting(description, currency, normalized)
-                digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-                prior = self._db.execute(
-                    "SELECT transaction_id, content_hash FROM journal_transactions "
-                    "WHERE idempotency_key=?", (key,),
-                ).fetchone()
-                if prior is not None:
-                    if prior["content_hash"] != digest:
-                        raise IdempotencyConflict(
-                            "idempotency key was already used for different journal content"
-                        )
-                    self._db.execute("COMMIT")
-                    return prior["transaction_id"]
+```python
+from banking_service import BankingService
+from financial_ledger import FinancialLedger
 
-                for row, amount in account_rows:
-                    current = self._balance_minor_unlocked(row["account_id"])
-                    next_balance = current + amount
-                    if not _MIN_INT64 <= next_balance <= _MAX_INT64:
-                        raise LedgerError(
-                            "posting would exceed the supported account-balance range: "
-                            + row["account_id"]
-                        )
-                    if not row["allow_negative"] and next_balance < 0:
-                        raise InsufficientFunds(
-                            "posting would make account negative: " + row["account_id"]
-                        )
+ledger = FinancialLedger("data/butter-bank.sqlite3")
+service = BankingService(ledger, principal_resolver=trusted_identity_resolver)
+```
 
-                transaction_id = str(uuid.uuid4())
-                created_at = datetime.now(timezone.utc).isoformat()
-                self._db.execute(
-                    "INSERT INTO journal_transactions(transaction_id, idempotency_key, "
-                    "content_hash, description, created_at) VALUES (?, ?, ?, ?, ?)",
-                    (transaction_id, key, digest, description, created_at),
-                )
-                self._db.executemany(
-                    "INSERT INTO journal_entries(transaction_id, account_id, amount_minor) "
-                    "VALUES (?, ?, ?)",
-                    [(transaction_id, account_id, amount)
-                     for account_id, amount in normalized],
-                )
-                self._db.execute("COMMIT")
-                return transaction_id
-            except Exception:
-                self._db.execute("ROLLBACK")
-                raise
+The resolver receives an opaque credential and must validate it before returning the owner reference associated with the JaMail account used for the request. The service rejects missing or invalid credentials and does not accept an owner reference from the client.
 
-    def journal(self, account_id, limit=100):
-        with self._lock:
-            self.account(account_id)
-            if (not isinstance(limit, int) or isinstance(limit, bool)
-                    or not 1 <= limit <= 1000):
-                raise LedgerError("journal limit must be between 1 and 1000")
-            rows = self._db.execute(
-                "SELECT t.transaction_id, t.idempotency_key, t.description, "
-                "t.created_at, e.amount_minor FROM journal_entries e "
-                "JOIN journal_transactions t USING(transaction_id) "
-                "WHERE e.account_id=? ORDER BY e.entry_id DESC LIMIT ?",
-                (account_id, limit),
-            ).fetchall()
-            return [dict(row) for row in rows]
+A JaMail HTTPS credential-introspection adapter is present in jamail_identity.py. Its expected request and response format was authored for that adapter in this repository; it must not be mistaken for an existing JaMail endpoint or API. Do not connect it to an unverified resolver, hardcode signing secrets, or treat a client-provided owner reference as authentication.
 
-    def statement_for_owner(self, authenticated_owner_ref, account_id, limit=100):
-        """Return account metadata, exact balance, and journal for its owner."""
-        with self._lock:
-            account = self.account_for_owner(authenticated_owner_ref, account_id)
-            return {
-                "account": account,
-                "balance_minor": self.balance_minor(account_id),
-                "entries": self.journal(account_id, limit),
-            }
+## JaMail identity integration
 
-    def transfer(
-        self, authenticated_owner_ref, source_account_id,
-        destination_account_id, amount_minor, idempotency_key,
-        description="Account transfer",
-    ):
-        """Post an owner-authorized internal transfer in one currency.
+Butter Bank includes a JaMail introspection adapter in jamail_identity.py and a service factory in banking_runtime.py. The adapter sends an opaque bearer credential to a configured HTTPS endpoint using an authenticated service-client credential. It expects a JSON response containing active, iss, aud, sub, and exp fields. These names and meanings are the adapter's proposed interface, not evidence of an already deployed JaMail API. The sub field is treated by this adapter as the owner reference returned after credential validation.
 
-        authenticated_owner_ref must come from a trusted authentication layer,
-        not directly from an untrusted request field. This method does not
-        initiate or represent external payment-rail settlement.
-        """
-        owner_ref = self._text(authenticated_owner_ref, "authenticated owner reference")
-        source_id = self._text(source_account_id, "source account ID")
-        destination_id = self._text(destination_account_id, "destination account ID")
-        if source_id == destination_id:
-            raise LedgerError("source and destination accounts must differ")
-        if (not isinstance(amount_minor, int) or isinstance(amount_minor, bool)
-                or not 1 <= amount_minor < 2**63):
-            raise LedgerError("transfer amount must be a positive integer")
-        with self._lock:
-            source = self.account(source_id)
-            destination = self.account(destination_id)
-            if source["owner_ref"] != owner_ref:
-                raise AccountAccessDenied("source account is not owned by the authenticated account owner")
-            if source["currency_code"] != destination["currency_code"]:
-                raise LedgerError("one transfer cannot mix currencies")
-            return self.post(
-                idempotency_key, description,
-                [(source_id, -amount_minor), (destination_id, amount_minor)],
-            )
+Configure the Butter Bank process with these runtime settings:
+- JAMAIL_INTROSPECTION_URL: JaMail's HTTPS introspection endpoint.
+- JAMAIL_INTROSPECTION_CLIENT_ID: Butter Bank's registered JaMail service-client ID.
+- JAMAIL_INTROSPECTION_CLIENT_SECRET: secret issued to that service client.
+- JAMAIL_ISSUER: exact JaMail token issuer.
+- BUTTER_BANK_JAMAIL_AUDIENCE: audience registered for Butter Bank.
 
-    def close(self):
-        with self._lock:
-            if self._db is not None:
-                self._db.close()
-                self._db = None
+Create the service with create_jamail_banking_service(ledger). Do not commit service credentials or place them in source control. The HTTP API continues to bind to loopback by default.
 
-    def __enter__(self):
-        return self
+Integration status: this repository contains the adapter and isolated tests for its proposed response format. Those tests do not establish a live connection to JaMail. The JaMail repository and published Wix site must be assessed against the actual JaMail account and session implementation before this adapter can be connected.
 
-    def __exit__(self, exc_type, exc, traceback):
-        self.close()
+## Local HTTP API
+
+`banking_api.py` provides a threaded HTTP server for the application service. It binds to `127.0.0.1` by default:
+
+```python
+from banking_api import create_server
+
+server = create_server(service, host="127.0.0.1", port=8000)
+server.serve_forever()
+```
+
+Every supported route requires an `Authorization: Bearer <credential>` header. The credential is passed to the injected identity resolver; the HTTP API never accepts an owner reference in a request body.
+
+| Method | Route | Purpose |
+|---|---|---|
+| GET | `/currencies` | Read registered currency and asset precision metadata |
+| POST | `/accounts` | Open an account using `currency_code` and optional `account_type` |
+| GET | `/accounts` | List the authenticated owner's accounts |
+| GET | `/accounts/{account_id}/statement?limit=100` | Read an owner's account statement |
+| POST | `/transfers` | Transfer integer minor units between internal accounts |
+
+JSON request bodies are limited to 64 KiB. The API does not expose arbitrary journal posting, deposits, withdrawals, card authorization, or external payment settlement. It has no built-in TLS termination, rate limiting, or production identity provider. Keep it on loopback until a verified JaMail identity adapter and an authenticated TLS reverse proxy are configured.
