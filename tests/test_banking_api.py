@@ -7,7 +7,10 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from banking_api import MAX_REQUEST_BYTES, create_server
+from banking_api import (
+    DEFAULT_MAX_WORKERS, MAX_REQUEST_BYTES, BoundedThreadingHTTPServer,
+    create_server,
+)
 from banking_service import BankingService
 from financial_ledger import FinancialLedger
 
@@ -169,6 +172,19 @@ class BankingAPITests(unittest.TestCase):
                 ValueError, "IPv4 loopback"
             ):
                 create_server(self.service, host=host, port=0)
+
+    def test_server_uses_bounded_worker_pool(self):
+        self.assertIsInstance(self.server, BoundedThreadingHTTPServer)
+        self.assertEqual(DEFAULT_MAX_WORKERS, 32)
+
+    def test_server_rejects_invalid_worker_limits(self):
+        for workers in (0, -1, True, 1.5, "4"):
+            with self.subTest(workers=workers), self.assertRaisesRegex(
+                ValueError, "max_workers must be a positive integer"
+            ):
+                create_server(
+                    self.service, host="127.0.0.1", port=0, max_workers=workers
+                )
 
     def test_server_rejects_invalid_port_values(self):
         for port in (-1, 65536, True, "8000"):
