@@ -62,6 +62,17 @@ class BankingServiceTests(unittest.TestCase):
                 "unauthorized-service-transfer",
             )
 
+    def test_transfer_idempotency_keys_are_scoped_to_the_account_owner(self):
+        first = self.service.transfer(
+            "credential-a", self.owner_a, self.owner_b, 100, "shared-key"
+        )
+        second = self.service.transfer(
+            "credential-b", self.owner_b, self.owner_a, 100, "shared-key"
+        )
+        self.assertNotEqual(first, second)
+        self.assertEqual(self.ledger.balance_minor(self.owner_a), 5000)
+        self.assertEqual(self.ledger.balance_minor(self.owner_b), 0)
+
     def test_invalid_or_expired_credential_is_rejected(self):
         with self.assertRaises(AuthenticationError):
             self.service.accounts("unknown-credential")

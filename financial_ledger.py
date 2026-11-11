@@ -403,8 +403,11 @@ class FinancialLedger:
                 raise AccountAccessDenied("source account is not owned by the authenticated account owner")
             if source["currency_code"] != destination["currency_code"]:
                 raise LedgerError("one transfer cannot mix currencies")
+            scoped_key = "transfer:" + hashlib.sha256(
+                owner_ref.encode("utf-8")
+            ).hexdigest() + ":" + self._text(idempotency_key, "idempotency key")
             return self.post(
-                idempotency_key, description,
+                scoped_key, description,
                 [(source_id, -amount_minor), (destination_id, amount_minor)],
             )
 

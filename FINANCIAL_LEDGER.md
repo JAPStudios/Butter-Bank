@@ -64,7 +64,7 @@ transaction_id = ledger.transfer(
 
 The caller must pass the owner reference returned by the trusted credential-validation layer. The source account must belong to that JaMail account. The destination may belong to a different account owner. Both accounts must use the same currency. The journal posts the debit and credit atomically, rejects overdrafts by default, and returns the original transaction ID when the same idempotent request is retried.
 
-The idempotency key must be unique for each distinct operation. Reusing a key for different journal content is rejected.
+The idempotency key must be unique for each distinct operation by the same account owner. Transfer keys are scoped to the authenticated account-owner reference, so different JaMail accounts may independently use the same key. Reusing a key for different journal content within one account owner is rejected.
 
 ## Direct journal posting
 
