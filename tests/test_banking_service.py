@@ -95,6 +95,16 @@ class BankingServiceTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             BankingService(self.ledger, None)
 
+    def test_service_startup_rejects_a_tampered_ledger(self):
+        self.ledger._db.execute(
+            "UPDATE journal_entries SET amount_minor=amount_minor+1 "
+            "WHERE transaction_id=(SELECT transaction_id FROM journal_transactions "
+            "WHERE idempotency_key='fund-owner-a') AND account_id=?",
+            (self.owner_a,),
+        )
+        with self.assertRaisesRegex(LedgerError, "does not balance"):
+            BankingService(self.ledger, lambda credential: "owner-a")
+
     def test_runtime_factory_uses_the_supplied_account_owner_resolver(self):
         service = create_banking_service(self.ledger, lambda credential: "owner-a")
         self.assertEqual(
