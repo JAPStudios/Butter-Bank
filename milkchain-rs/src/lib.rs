@@ -344,7 +344,10 @@ impl BftChain {
             return Err(ChainError::Consensus("insufficient precommit voting power".into()));
         }
         self.blocks.push(Block { header, hash, prevotes, precommits });
-        self.save()?;
+        if let Err(error) = self.save() {
+            self.blocks.pop();
+            return Err(error);
+        }
         Ok(self.blocks.last().unwrap())
     }
 
