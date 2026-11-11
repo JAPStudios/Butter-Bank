@@ -98,7 +98,7 @@ service = BankingService(ledger, principal_resolver=trusted_identity_resolver)
 
 The resolver receives an opaque credential and must validate it before returning a stable owner reference. It is responsible for verifying the credential's signature, issuer, audience, expiry, and revocation status. The service rejects missing or invalid principals and does not accept an owner reference from the client.
 
-No production JaMail identity adapter is connected yet. Do not supply an unverified resolver, hardcode token-signing secrets, or treat a client-provided account owner reference as authentication. Account access must remain disabled until a trusted JaMail credential-validation contract is available and independently tested.
+A JaMail HTTPS introspection adapter is implemented in jamail_identity.py, but it cannot authenticate real sessions until JaMail provides the matching introspection endpoint, stable account-subject contract, and service-client credentials. Do not supply an unverified resolver, hardcode token-signing secrets, or treat a client-provided account owner reference as authentication. Account access must remain disabled until the JaMail-side contract is deployed and independently tested.
 
 ## JaMail identity integration
 
