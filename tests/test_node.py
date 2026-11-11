@@ -12,7 +12,10 @@ from pathlib import Path
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives import serialization
 
-from node import API, Chain, bhash, canon, signing_bytes, synchronize_peer, get, post
+from node import (
+    API, Chain, bhash, canon, signing_bytes, synchronize_peer, get, post,
+    validate_pow_node_config,
+)
 
 
 def wallet():
@@ -42,6 +45,19 @@ class ChainValidationTests(unittest.TestCase):
         }
         self.chain = Chain(self.cfg, self.path)
 
+    def test_pow_node_rejects_bft_and_unknown_consensus_modes(self):
+        validate_pow_node_config({"consensus": "pow"})
+        validate_pow_node_config({})
+        for mode in ("bft", "proof-of-stake", "unknown", None):
+            with self.subTest(mode=mode), self.assertRaisesRegex(
+                ValueError, "node.py runs the proof-of-work node"
+            ):
+                validate_pow_node_config({"consensus": mode})
+
+    def test_pow_node_requires_object_configuration(self):
+        with self.assertRaisesRegex(ValueError, "configuration must be a JSON object"):
+            validate_pow_node_config([])
+    
     def test_rejects_invalid_configuration(self):
         for changes in (
             {"difficulty": True},
