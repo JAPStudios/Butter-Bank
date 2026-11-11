@@ -80,7 +80,8 @@ class BFTChainTests(unittest.TestCase):
             with patch("bft_chain.os.fsync", side_effect=fail_directory_sync):
                 with self.assertRaisesRegex(OSError, "directory sync failed"):
                     chain.save()
-            chain.save()
+            with self.assertRaisesRegex(RuntimeError, "persistence is uncertain"):
+                chain.build_proposal(select_proposer(chain.validators, 1, 0))
 
     def test_validator_key_creation_propagates_directory_sync_failure(self):
         if os.name != "posix":
