@@ -122,14 +122,13 @@ class BFTChain(Chain):
                 stream.flush()
                 os.fsync(stream.fileno())
             os.replace(temporary, self.path)
-            try:
-                directory_fd = os.open(self.path.parent, os.O_RDONLY)
+            if os.name == "posix":
+                directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+                directory_fd = os.open(self.path.parent, directory_flags)
                 try:
                     os.fsync(directory_fd)
                 finally:
                     os.close(directory_fd)
-            except OSError:
-                pass
         except Exception:
             try:
                 os.unlink(temporary)
