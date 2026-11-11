@@ -44,7 +44,7 @@ class BankingServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(LedgerError, "not owned"):
             self.service.statement("credential-b", self.owner_a)
 
-    def test_transfer_uses_authenticated_principal_and_ledger_rules(self):
+    def test_transfer_uses_authenticated_account_owner_and_ledger_rules(self):
         transaction_id = self.service.transfer(
             "credential-a", self.owner_a, self.owner_b, 1250, "service-transfer"
         )
