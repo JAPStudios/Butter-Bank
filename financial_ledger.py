@@ -34,6 +34,10 @@ class InsufficientFunds(LedgerError):
     """A posting would make a non-overdraft account negative."""
 
 
+class AccountAccessDenied(LedgerError):
+    """An authenticated principal attempted to access another owner's account."""
+
+
 class FinancialLedger:
     """SQLite-backed, multi-currency double-entry journal.
 
@@ -202,7 +206,7 @@ class FinancialLedger:
         with self._lock:
             account = self.account(account_id)
             if account["owner_ref"] != owner_ref:
-                raise LedgerError("account is not owned by the authenticated principal")
+                raise AccountAccessDenied("account is not owned by the authenticated principal")
             return account
 
     def accounts_for_owner(self, owner_ref):
@@ -387,7 +391,7 @@ class FinancialLedger:
             source = self.account(source_id)
             destination = self.account(destination_id)
             if source["owner_ref"] != owner_ref:
-                raise LedgerError("source account is not owned by the authenticated principal")
+                raise AccountAccessDenied("source account is not owned by the authenticated principal")
             if source["currency_code"] != destination["currency_code"]:
                 raise LedgerError("one transfer cannot mix currencies")
             return self.post(
