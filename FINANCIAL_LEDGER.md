@@ -106,7 +106,7 @@ The resolver receives the credential supplied with the request and must validate
 
 ## Local HTTP API
 
-`banking_api.py` provides a threaded HTTP server for the application service. It binds to `127.0.0.1` by default:
+`banking_api.py` provides a threaded HTTP server for the application service. It binds only to an IPv4 loopback address (default `127.0.0.1`); non-loopback host addresses are rejected:
 
 ```python
 from banking_api import create_server
@@ -125,4 +125,4 @@ Every supported route requires an `Authorization: Bearer <credential>` header. T
 | GET | `/accounts/{account_id}/statement?limit=100` | Read an owner's account statement |
 | POST | `/transfers` | Transfer integer minor units between internal accounts |
 
-JSON request bodies are limited to 64 KiB. The API does not expose arbitrary journal posting, deposits, withdrawals, card authorization, or external payment settlement. It has no built-in TLS termination, rate limiting, or production credential-validation provider. Keep it on loopback until the actual JaMail credential validator and an authenticated TLS reverse proxy are configured. Credential-source outages return HTTP 503; invalid credentials return HTTP 401.
+JSON request bodies are limited to 64 KiB. The API does not expose arbitrary journal posting, deposits, withdrawals, card authorization, or external payment settlement. It has no built-in TLS termination, rate limiting, or production credential-validation provider. Keep it on loopback; remote access requires a separately designed authenticated TLS gateway. Credential-source outages return HTTP 503; invalid credentials return HTTP 401.
