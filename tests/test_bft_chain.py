@@ -82,6 +82,10 @@ class BFTChainTests(unittest.TestCase):
                     chain.save()
             with self.assertRaisesRegex(RuntimeError, "persistence is uncertain"):
                 chain.build_proposal(select_proposer(chain.validators, 1, 0))
+            with self.assertRaisesRegex(RuntimeError, "persistence is uncertain"):
+                chain.add_tx({})
+            with self.assertRaisesRegex(RuntimeError, "persistence is uncertain"):
+                chain.validate_proposal_block({})
 
     def test_validator_key_creation_propagates_directory_sync_failure(self):
         if os.name != "posix":
