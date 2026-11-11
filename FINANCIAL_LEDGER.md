@@ -83,3 +83,19 @@ This module does not yet provide:
 - Encryption of the SQLite database at rest, key management for customer identity, replicated storage, or production disaster recovery.
 
 Do not place real customer funds or production credentials in this development ledger. Those capabilities require separate designs, provider integrations, regulatory authorization, security review, and operational controls.
+
+## Authenticated application-service boundary
+
+`banking_service.py` exposes account opening, account listing, owner-scoped statements, and internal transfers through an injected identity resolver:
+
+```python
+from banking_service import BankingService
+from financial_ledger import FinancialLedger
+
+ledger = FinancialLedger("data/butter-bank.sqlite3")
+service = BankingService(ledger, principal_resolver=trusted_identity_resolver)
+```
+
+The resolver receives an opaque credential and must validate it before returning a stable owner reference. It is responsible for verifying the credential's signature, issuer, audience, expiry, and revocation status. The service rejects missing or invalid principals and does not accept an owner reference from the client.
+
+No production JaMail identity adapter is connected yet. Do not supply an unverified resolver, hardcode token-signing secrets, or treat a client-provided account owner reference as authentication. Account access must remain disabled until a trusted JaMail credential-validation contract is available and independently tested.
