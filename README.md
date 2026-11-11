@@ -2,7 +2,15 @@
 
 Butter Bank is a bank.
 
-This repository contains Milkchain, the blockchain for Biscuits. Its code covers account transaction rules, stake-free Byzantine fault-tolerant consensus, validator admission, validator-set transitions, transaction signing, encrypted Biscuits key storage, plus node communication.
+This repository contains the Milkchain blockchain for Biscuits and the financial-ledger foundation. Milkchain provides stake-free Byzantine fault-tolerant consensus, validator admission, validator-set transitions, transaction signing, encrypted Biscuits key storage, plus node communication. The financial ledger provides exact multi-currency double-entry accounting, owner-scoped account listing, and atomic internal transfers.
+
+## Financial ledger
+
+The SQLite-backed journal stores amounts as integer minor units, balances each transaction within one currency, prevents overdrafts by default, supports idempotent posting, and persists journal history. USD is registered with two decimal places; JPY is registered with zero. Other currencies and assets require an explicit precision registration.
+
+Account listing is scoped by an owner reference. Internal transfers require the source account to belong to the authenticated owner reference supplied by a trusted identity layer. Do not accept that reference directly from an untrusted request body.
+
+See [FINANCIAL_LEDGER.md](FINANCIAL_LEDGER.md) for the module interface and examples.
 
 ## Milkchain
 
@@ -23,8 +31,8 @@ PYTHONPATH=milkchain python -m unittest discover -s tests -v
 
 ## Security status
 
-The current code is not ready to secure live customer funds. Remaining work includes cryptographic protection against signer-state rollback, expanded network-partition and recovery testing, formal protocol review, an independent security audit, plus production operational controls.
+The current code is not ready to secure live customer funds. Remaining work includes a trusted cryptographic anti-rollback anchor for validator signer state, expanded network-partition and recovery testing, formal protocol review, an independent security audit, plus production operational controls.
 
 Signer state is written atomically and protected against concurrent local processes. Those protections do not prevent an operator or attacker from restoring an older copy of both the chain data and signer state. Do not treat local disk protections as a cryptographic rollback anchor.
 
-The committed example configuration contains placeholders. It is not a live validator configuration. Never commit private keys, admission credentials, completed node configuration, or signer state.
+The financial ledger is an accounting component, not a deposit-taking or payment-settlement system. It does not authenticate customers, custody external funds, connect to payment rails, or establish deposit insurance. POSIX database files are restricted to owner read/write permissions. The committed example Milkchain configuration contains placeholders; it is not a live validator configuration. Never commit private keys, admission credentials, completed node configuration, or signer state.
