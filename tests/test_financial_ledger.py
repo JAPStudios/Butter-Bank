@@ -1,3 +1,5 @@
+import os
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -95,6 +97,25 @@ class FinancialLedgerTests(unittest.TestCase):
         self.ledger = FinancialLedger(self.path)
         self.assertEqual(self.ledger.balance_minor(self.usd_a), 250)
         self.assertEqual(len(self.ledger.journal(self.usd_a)), 1)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX file permissions")
+    def test_database_file_is_created_with_private_permissions(self):
+        self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o600)
+
+    def test_database_parent_directory_is_created(self):
+        nested = self.path.parent / "nested" / "ledger.sqlite3"
+        ledger = FinancialLedger(nested)
+        try:
+            self.assertTrue(nested.is_file())
+        finally:
+            ledger.close()
+
+    @unittest.skipUnless(hasattr(os, "symlink"), "symlink support")
+    def test_symlinked_database_path_is_rejected(self):
+        link = self.path.parent / "ledger-link.sqlite3"
+        link.symlink_to(self.path)
+        with self.assertRaisesRegex(LedgerError, "symbolic link"):
+            FinancialLedger(link)
 
     def test_amounts_must_be_integers_not_floats_or_booleans(self):
         for index, amount in enumerate((1.5, True, 0)):
