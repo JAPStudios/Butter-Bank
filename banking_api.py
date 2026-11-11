@@ -9,6 +9,7 @@ from __future__ import annotations
 import ipaddress
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import threading
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from banking_service import (
@@ -24,10 +25,46 @@ from financial_ledger import (
 )
 
 MAX_REQUEST_BYTES = 64 * 1024
+DEFAULT_MAX_WORKERS = 32
+REQUEST_SOCKET_TIMEOUT_SECONDS = 10
+
+
+class BoundedThreadingHTTPServer(ThreadingHTTPServer):
+    """Limit concurrent request threads and release slots on every exit path."""
+
+    daemon_threads = True
+    block_on_close = False
+
+    def __init__(self, server_address, handler_class, max_workers=DEFAULT_MAX_WORKERS):
+        if (not isinstance(max_workers, int) or isinstance(max_workers, bool)
+                or max_workers < 1):
+            raise ValueError("max_workers must be a positive integer")
+        self._request_slots = threading.BoundedSemaphore(max_workers)
+        super().__init__(server_address, handler_class)
+
+    def process_request(self, request, client_address):
+        if not self._request_slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self._request_slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._request_slots.release()
 
 
 class BankingAPIHandler(BaseHTTPRequestHandler):
     service: BankingService | None = None
+
+    def setup(self):
+        super().setup()
+        self.connection.settimeout(REQUEST_SOCKET_TIMEOUT_SECONDS)
     server_version = "ButterBankAPI/0.1"
     sys_version = ""
 
@@ -185,8 +222,11 @@ class BankingAPIHandler(BaseHTTPRequestHandler):
         return
 
 
-def create_server(service: BankingService, host="127.0.0.1", port=8000):
-    """Create a threaded API server bound only to an IPv4 loopback address."""
+def create_server(
+    service: BankingService, host="127.0.0.1", port=8000,
+    max_workers=DEFAULT_MAX_WORKERS,
+):
+    """Create a bounded API server bound only to an IPv4 loopback address."""
     if not isinstance(service, BankingService):
         raise TypeError("service must be a BankingService")
     if not isinstance(host, str):
@@ -202,4 +242,4 @@ def create_server(service: BankingService, host="127.0.0.1", port=8000):
     handler = type("ConfiguredBankingAPIHandler", (BankingAPIHandler,), {
         "service": service,
     })
-    return ThreadingHTTPServer((host, port), handler)
+    return BoundedThreadingHTTPServer((host, port), handler, max_workers=max_workers)
