@@ -1,4 +1,6 @@
 import io
+import os
+import stat
 import json
 import tempfile
 import threading
@@ -69,6 +71,28 @@ class ChainValidationTests(unittest.TestCase):
             cfg.update(changes)
             with self.assertRaises(ValueError):
                 Chain(cfg, Path(self.temp.name) / ("bad-" + str(len(changes)) + ".json"))
+
+    def test_chain_file_permissions_and_persistence_failure_are_fail_closed(self):
+        if os.name == "posix":
+            self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o600)
+        original = self.path.read_bytes()
+        with patch("node.os.fsync", side_effect=OSError("simulated fsync failure")):
+            with self.assertRaisesRegex(OSError, "simulated fsync failure"):
+                self.chain.save()
+        self.assertTrue(self.chain._persistence_uncertain)
+        self.assertEqual(self.path.read_bytes(), original)
+        with self.assertRaisesRegex(RuntimeError, "persistence is uncertain"):
+            self.chain.mine("00" * 32)
+
+    def test_chain_rejects_symbolic_link_data_path(self):
+        if not hasattr(os, "symlink"):
+            self.skipTest("symbolic links are unavailable")
+        target = Path(self.temp.name) / "target.json"
+        target.write_text("{}")
+        link = Path(self.temp.name) / "chain-link.json"
+        link.symlink_to(target)
+        with self.assertRaisesRegex(ValueError, "must not be a symbolic link"):
+            Chain(self.cfg, link)
 
     def test_mined_block_validates_and_persists(self):
         _, _, address = wallet()
