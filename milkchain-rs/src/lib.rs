@@ -336,7 +336,7 @@ impl BftChain {
         let mut state = self.state()?;
         for tx in &header.transactions { self.apply_transaction(tx, &mut state)?; }
         let hash = Self::block_hash(&header)?;
-        let threshold = ((2u128 * self.total_power as u128 + 2) / 3) as u64;
+        let threshold = ((2u128 * self.total_power as u128) / 3 + 1) as u64;
         if self.certificate_power(&prevotes, "prevote", &header, &hash)? < threshold {
             return Err(ChainError::Consensus("insufficient prevote voting power".into()));
         }
@@ -363,7 +363,7 @@ impl BftChain {
             for tx in &header.transactions {
                 if self.apply_transaction(tx, &mut state).is_err() { return false; }
             }
-            let threshold = ((2u128 * self.total_power as u128 + 2) / 3) as u64;
+            let threshold = ((2u128 * self.total_power as u128) / 3 + 1) as u64;
             if self.certificate_power(&block.prevotes, "prevote", header, &block.hash).unwrap_or(0) < threshold
                 || self.certificate_power(&block.precommits, "precommit", header, &block.hash).unwrap_or(0) < threshold {
                 return false;
