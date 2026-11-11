@@ -8,7 +8,7 @@ This repository contains the Milkchain blockchain for Biscuits and the financial
 
 The SQLite-backed journal stores amounts as integer minor units, balances each transaction within one currency, prevents overdrafts by default, supports idempotent posting, and persists journal history. USD is registered with two decimal places; JPY is registered with zero. Other currencies and assets require an explicit precision registration.
 
-Account listing is scoped by an owner reference. Internal transfers require the source account to belong to the authenticated owner reference supplied by a trusted identity layer. Do not accept that reference directly from an untrusted request body.
+Account listing is scoped to the owner reference associated with the JaMail account used for the request. Internal transfers require the source account to belong to that same account owner. The owner reference must come from trusted credential validation, never directly from an untrusted request body.
 
 See [FINANCIAL_LEDGER.md](FINANCIAL_LEDGER.md) for the module interface and examples.
 
