@@ -2,13 +2,13 @@
 
 Butter Bank is a bank.
 
-This repository contains the Milkchain blockchain for Biscuits and the financial-ledger foundation. Milkchain provides stake-free Byzantine fault-tolerant consensus, validator admission, validator-set transitions, transaction signing, encrypted Biscuits key storage, plus node communication. The financial ledger provides exact multi-currency double-entry accounting, owner-scoped account listing and statements, atomic internal transfers, an authenticated application-service boundary, and a loopback-first HTTP API.
+This repository contains the Milkchain blockchain for Biscuits and the financial-ledger foundation. Milkchain provides stake-free Byzantine fault-tolerant consensus, validator admission, validator-set transitions, transaction signing, encrypted Biscuits key storage, plus node communication. The financial ledger provides exact multi-currency double-entry accounting, owner-scoped account listing and statements, atomic internal transfers, an owner-scoped application-service boundary, and a loopback-first HTTP API.
 
 ## Financial ledger
 
 The SQLite-backed journal stores amounts as integer minor units, balances each transaction within one currency, prevents overdrafts by default, supports idempotent posting, and persists journal history. USD is registered with two decimal places; JPY is registered with zero. Other currencies and assets require an explicit precision registration.
 
-Account listing is scoped to the owner reference associated with the JaMail account used for the request. Internal transfers require the source account to belong to that same account owner. The owner reference must come from trusted credential validation, never directly from an untrusted request body.
+Account listing and statements are scoped to an opaque owner reference supplied by the configured credential resolver. Internal transfers require the source account to match that reference. The reference is never accepted directly from an untrusted request body. The resolver's credential source and validation policy are deployment-specific; this repository does not prescribe an upstream account system or protocol.
 
 See [FINANCIAL_LEDGER.md](FINANCIAL_LEDGER.md) for the module interface and examples.
 
