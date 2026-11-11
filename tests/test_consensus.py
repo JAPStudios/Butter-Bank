@@ -7,6 +7,7 @@ import threading
 import urllib.request
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 from email.message import Message
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -275,6 +276,28 @@ class BFTPrimitiveTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 reopened.sign_vote(0, 'prevote', 'cd' * 32)
             reopened.close()
+
+    def test_signer_fails_closed_when_directory_sync_fails(self):
+        key, _ = self.keys_and_records[0]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "durability-state.json"
+            signer = ConsensusSigner(key, self.chain_id, self.validators, path)
+            real_fsync = os.fsync
+            calls = []
+
+            def fail_directory_sync(fd):
+                calls.append(fd)
+                if len(calls) == 2:
+                    raise OSError("directory sync failed")
+                return real_fsync(fd)
+
+            with patch("signer.os.fsync", side_effect=fail_directory_sync):
+                with self.assertRaisesRegex(OSError, "directory sync failed"):
+                    signer.sign_vote(0, "prevote", self.block_hash)
+
+            with self.assertRaisesRegex(RuntimeError, "durability is uncertain"):
+                signer.sign_vote(0, "prevote", self.block_hash)
+            signer.close()
 
     def test_signer_requires_prevote_quorum_lock_before_precommit(self):
         key, _ = self.keys_and_records[0]

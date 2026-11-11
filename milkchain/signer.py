@@ -19,6 +19,10 @@ def _synchronized(method):
         with self._lock:
             if getattr(self, "_closed", False):
                 raise RuntimeError("validator signer is closed")
+            if getattr(self, "_poisoned", False):
+                raise RuntimeError(
+                    "validator signer state durability is uncertain; signing is disabled"
+                )
             return method(self, *args, **kwargs)
     return wrapper
 
@@ -30,6 +34,7 @@ class ConsensusSigner:
         if not isinstance(initial_height, int) or isinstance(initial_height, bool) or initial_height < 1:
             raise ValueError("initial_height must be a positive integer")
         self._lock = threading.RLock()
+        self._poisoned = False
         self.key = private_key
         self.public_key = private_key.public_key().public_bytes_raw().hex()
         self.chain_id = chain_id
@@ -281,15 +286,17 @@ class ConsensusSigner:
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(name, self.path)
-            try:
-                directory_fd = os.open(self.path.parent, os.O_RDONLY)
+            if os.name == "posix":
+                directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+                directory_fd = os.open(self.path.parent, directory_flags)
                 try:
                     os.fsync(directory_fd)
                 finally:
                     os.close(directory_fd)
-            except OSError:
-                pass
         except Exception:
+            # A failed persistence operation leaves the on-disk state uncertain.
+            # Stop this signer rather than risk signing from an uncommitted state.
+            self._poisoned = True
             try:
                 os.unlink(name)
             except OSError:
