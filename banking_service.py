@@ -34,6 +34,7 @@ class BankingService:
             raise TypeError("ledger must be a FinancialLedger")
         if not callable(account_owner_resolver):
             raise TypeError("account_owner_resolver must be callable")
+        ledger.verify_integrity()
         self.ledger = ledger
         self._account_owner_resolver = account_owner_resolver
 

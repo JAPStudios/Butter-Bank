@@ -90,7 +90,7 @@ Do not place real customer funds or production credentials in this development l
 
 ## Account-owner credential boundary
 
-`banking_service.py` exposes account opening, account listing, owner-scoped statements, and internal transfers through an injected account-owner resolver:
+`banking_service.py` exposes account opening, account listing, owner-scoped statements, and internal transfers through an injected account-owner resolver. Service construction runs `verify_integrity()` first and refuses to start when the ledger's structure, journal balances, content hashes, or account-balance rules fail:
 
 ```python
 from banking_runtime import create_banking_service
