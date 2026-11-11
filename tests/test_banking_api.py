@@ -70,6 +70,14 @@ class BankingAPITests(unittest.TestCase):
         status, body = self.request("GET", "/accounts")
         self.assertEqual(status, 401)
 
+    def test_currency_catalog_returns_explicit_precision(self):
+        status, body = self.request("GET", "/currencies", "token-a")
+        self.assertEqual(status, 200)
+        currencies = {item["code"]: item for item in body["currencies"]}
+        self.assertEqual(currencies["USD"]["minor_unit_exponent"], 2)
+        self.assertEqual(currencies["JPY"]["minor_unit_exponent"], 0)
+        self.assertEqual(currencies["USD"]["asset_class"], "fiat")
+
     def test_statement_endpoint_enforces_account_ownership(self):
         status, body = self.request(
             "GET", "/accounts/" + self.owner_a + "/statement", "token-a"
