@@ -17,6 +17,13 @@ def generate_keypair(path):
             stream.write(seed)
             stream.flush()
             os.fsync(stream.fileno())
+        if os.name == "posix":
+            directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+            directory_fd = os.open(target.parent, directory_flags)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
     except Exception:
         try:
             target.unlink()

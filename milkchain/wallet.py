@@ -168,6 +168,13 @@ def write_new_wallet(path, key, passphrase):
             output.write(payload)
             output.flush()
             os.fsync(output.fileno())
+        if os.name == "posix":
+            directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+            directory_fd = os.open(target.parent, directory_flags)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
     except Exception:
         try:
             target.unlink()
@@ -197,14 +204,13 @@ def _replace_wallet_file(target, key, passphrase, original_metadata):
         ):
             raise RuntimeError("wallet file changed during encryption; refusing to replace it")
         os.replace(temporary, target)
-        try:
-            directory_fd = os.open(target.parent, os.O_RDONLY)
+        if os.name == "posix":
+            directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+            directory_fd = os.open(target.parent, directory_flags)
             try:
                 os.fsync(directory_fd)
             finally:
                 os.close(directory_fd)
-        except OSError:
-            pass
     except Exception:
         try:
             os.unlink(temporary)

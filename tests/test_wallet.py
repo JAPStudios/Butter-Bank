@@ -28,6 +28,25 @@ class EncryptedWalletTests(unittest.TestCase):
         if os.name != "nt":
             self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
 
+    def test_wallet_creation_propagates_directory_sync_failure(self):
+        if os.name != "posix":
+            self.skipTest("directory synchronization is POSIX-specific")
+        key = Ed25519PrivateKey.generate()
+        real_fsync = os.fsync
+        calls = []
+
+        def fail_directory_sync(fd):
+            calls.append(fd)
+            if len(calls) == 2:
+                raise OSError("directory sync failed")
+            return real_fsync(fd)
+
+        from unittest.mock import patch
+        with patch("wallet.os.fsync", side_effect=fail_directory_sync):
+            with self.assertRaisesRegex(OSError, "directory sync failed"):
+                write_new_wallet(self.path, key, self.passphrase)
+        self.assertFalse(self.path.exists())
+
     def test_wrong_passphrase_and_tampered_ciphertext_are_rejected(self):
         key = Ed25519PrivateKey.generate()
         write_new_wallet(self.path, key, self.passphrase)

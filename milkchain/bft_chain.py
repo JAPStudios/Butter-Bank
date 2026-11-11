@@ -48,6 +48,7 @@ class BFTChain(Chain):
         self.initial_validators = [dict(item) for item in self.validators]
         self.validators_hash = validator_set_hash(self.validators)
         self.validator_transitions = []
+        self._persistence_uncertain = False
         self.consensus_mode = "bft"
         super().__init__(cfg, path)
         for peer in self.peers:
@@ -66,6 +67,16 @@ class BFTChain(Chain):
         # execution and structural checks; BFT certificates replace PoW.
         self.diff = 0
         self._refresh_active_validator_set()
+
+    def _ensure_persistence_healthy(self):
+        if self._persistence_uncertain:
+            raise RuntimeError(
+                "BFT chain persistence is uncertain; stop and reconcile the chain before continuing"
+            )
+
+    def add_tx(self, tx):
+        self._ensure_persistence_healthy()
+        return super().add_tx(tx)
 
     def _refresh_active_validator_set(self):
         """Select the set authorized for the next block from finalized history."""
@@ -105,6 +116,7 @@ class BFTChain(Chain):
 
     def save(self):
         """Atomically persist BFT chain state before signer finalization."""
+        self._ensure_persistence_healthy()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = json.dumps({
             "chain_id": self.id,
@@ -122,15 +134,15 @@ class BFTChain(Chain):
                 stream.flush()
                 os.fsync(stream.fileno())
             os.replace(temporary, self.path)
-            try:
-                directory_fd = os.open(self.path.parent, os.O_RDONLY)
+            if os.name == "posix":
+                directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+                directory_fd = os.open(self.path.parent, directory_flags)
                 try:
                     os.fsync(directory_fd)
                 finally:
                     os.close(directory_fd)
-            except OSError:
-                pass
         except Exception:
+            self._persistence_uncertain = True
             try:
                 os.unlink(temporary)
             except OSError:
@@ -240,6 +252,7 @@ class BFTChain(Chain):
     def validate_proposal_block(self, block):
         """Return the canonical block hash for a valid next-height proposal."""
         with self.lock:
+            self._ensure_persistence_healthy()
             if not isinstance(block, dict) or "commit_certificate" in block:
                 return None
             if not self.valid_chain(self.blocks + [block], require_certificates=False):
@@ -248,6 +261,7 @@ class BFTChain(Chain):
 
     def build_proposal(self, proposer, round_number=0, validator_transition=None):
         """Build a candidate for the deterministic proposer of this height/round."""
+        self._ensure_persistence_healthy()
         expected = select_proposer(self.validators, len(self.blocks), round_number)
         if proposer != expected:
             raise ValueError("proposer is not selected for this height and round")
@@ -292,6 +306,7 @@ class BFTChain(Chain):
         valid_round=None, valid_round_certificate=None,
     ):
         with self.lock:
+            self._ensure_persistence_healthy()
             finalized = dict(block)
             finalized["commit_round"] = round_number
             finalized["commit_certificate"] = list(commit_votes)
@@ -323,6 +338,7 @@ class BFTChain(Chain):
     def replace(self, blocks):
         """BFT finality forbids silently reorganizing already committed history."""
         with self.lock:
+            self._ensure_persistence_healthy()
             if not self.valid_chain(blocks):
                 return False, "candidate BFT chain invalid"
             if len(blocks) <= len(self.blocks):

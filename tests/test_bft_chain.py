@@ -63,6 +63,49 @@ class BFTChainTests(unittest.TestCase):
             "peers": [],
         }
 
+    def test_bft_chain_save_propagates_directory_sync_failure(self):
+        if os.name != "posix":
+            self.skipTest("directory synchronization is POSIX-specific")
+        with tempfile.TemporaryDirectory() as directory:
+            chain = BFTChain(self.cfg, Path(directory) / "chain.json")
+            real_fsync = os.fsync
+            calls = []
+
+            def fail_directory_sync(fd):
+                calls.append(fd)
+                if len(calls) == 2:
+                    raise OSError("directory sync failed")
+                return real_fsync(fd)
+
+            with patch("bft_chain.os.fsync", side_effect=fail_directory_sync):
+                with self.assertRaisesRegex(OSError, "directory sync failed"):
+                    chain.save()
+            with self.assertRaisesRegex(RuntimeError, "persistence is uncertain"):
+                chain.build_proposal(select_proposer(chain.validators, 1, 0))
+            with self.assertRaisesRegex(RuntimeError, "persistence is uncertain"):
+                chain.add_tx({})
+            with self.assertRaisesRegex(RuntimeError, "persistence is uncertain"):
+                chain.validate_proposal_block({})
+
+    def test_validator_key_creation_propagates_directory_sync_failure(self):
+        if os.name != "posix":
+            self.skipTest("directory synchronization is POSIX-specific")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "validator.key"
+            real_fsync = os.fsync
+            calls = []
+
+            def fail_directory_sync(fd):
+                calls.append(fd)
+                if len(calls) == 2:
+                    raise OSError("directory sync failed")
+                return real_fsync(fd)
+
+            with patch("keygen.os.fsync", side_effect=fail_directory_sync):
+                with self.assertRaisesRegex(OSError, "directory sync failed"):
+                    generate_keypair(path)
+            self.assertFalse(path.exists())
+
     def test_bft_chain_rejects_a_malformed_genesis_parent_without_raising(self):
         with tempfile.TemporaryDirectory() as directory:
             chain = BFTChain(self.cfg, Path(directory) / "malformed-parent.json")
