@@ -120,3 +120,27 @@ fn exactly_two_thirds_is_not_a_quorum() {
         ).is_ok());
     }
 }
+
+#[test]
+fn failed_persistence_does_not_advance_in_memory_chain() {
+    let keys: Vec<_> = (0..4).map(|_| key()).collect();
+    let directory = tempfile::tempdir().unwrap();
+    let parent = directory.path().join("ledger-dir");
+    std::fs::create_dir(&parent).unwrap();
+    let path = parent.join("ledger.json");
+    let mut chain = BftChain::new(
+        "milkchain-test",
+        validators(&keys),
+        BTreeMap::new(),
+        Some(path),
+    ).unwrap();
+
+    std::fs::remove_dir(&parent).unwrap();
+    std::fs::write(&parent, b"occupy the expected directory path").unwrap();
+
+    let header = chain.propose(vec![], 1, 0).unwrap();
+    let (prevotes, precommits) = certs(&keys, &chain, &header);
+    assert!(chain.commit(header, prevotes, precommits).is_err());
+    assert_eq!(chain.height(), 0);
+    assert_eq!(chain.blocks().len(), 1);
+}
