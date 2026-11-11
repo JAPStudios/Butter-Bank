@@ -99,3 +99,25 @@ service = BankingService(ledger, principal_resolver=trusted_identity_resolver)
 The resolver receives an opaque credential and must validate it before returning a stable owner reference. It is responsible for verifying the credential's signature, issuer, audience, expiry, and revocation status. The service rejects missing or invalid principals and does not accept an owner reference from the client.
 
 No production JaMail identity adapter is connected yet. Do not supply an unverified resolver, hardcode token-signing secrets, or treat a client-provided account owner reference as authentication. Account access must remain disabled until a trusted JaMail credential-validation contract is available and independently tested.
+
+## Local HTTP API
+
+`banking_api.py` provides a threaded HTTP server for the application service. It binds to `127.0.0.1` by default:
+
+```python
+from banking_api import create_server
+
+server = create_server(service, host="127.0.0.1", port=8000)
+server.serve_forever()
+```
+
+Every supported route requires an `Authorization: Bearer <credential>` header. The credential is passed to the injected identity resolver; the HTTP API never accepts an owner reference in a request body.
+
+| Method | Route | Purpose |
+|---|---|---|
+| POST | `/accounts` | Open an account using `currency_code` and optional `account_type` |
+| GET | `/accounts` | List the authenticated owner's accounts |
+| GET | `/accounts/{account_id}/statement?limit=100` | Read an owner's account statement |
+| POST | `/transfers` | Transfer integer minor units between internal accounts |
+
+JSON request bodies are limited to 64 KiB. The API does not expose arbitrary journal posting, deposits, withdrawals, card authorization, or external payment settlement. It has no built-in TLS termination, rate limiting, or production identity provider. Keep it on loopback until a verified JaMail identity adapter and an authenticated TLS reverse proxy are configured.
