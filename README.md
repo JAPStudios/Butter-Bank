@@ -2,7 +2,7 @@
 
 Butter Bank is a bank.
 
-This repository contains the Milkchain blockchain for Biscuits and the financial-ledger foundation. Milkchain provides stake-free Byzantine fault-tolerant consensus, validator admission, validator-set transitions, transaction signing, encrypted Biscuits key storage, plus node communication. The financial ledger provides exact multi-currency double-entry accounting, owner-scoped account listing and statements, atomic internal transfers, plus an authenticated application-service boundary.
+This repository contains the Milkchain blockchain for Biscuits and the financial-ledger foundation. Milkchain provides stake-free Byzantine fault-tolerant consensus, validator admission, validator-set transitions, transaction signing, encrypted Biscuits key storage, plus node communication. The financial ledger provides exact multi-currency double-entry accounting, owner-scoped account listing and statements, atomic internal transfers, an authenticated application-service boundary, and a loopback-first HTTP API.
 
 ## Financial ledger
 
