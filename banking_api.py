@@ -39,22 +39,30 @@ class BankingAPIHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _credential(self):
-        header = self.headers.get("Authorization", "")
-        scheme, separator, credential = header.partition(" ")
+        headers = self.headers.get_all("Authorization", [])
+        if len(headers) != 1:
+            raise AuthenticationError("exactly one bearer credential is required")
+        scheme, separator, credential = headers[0].partition(" ")
         if scheme.lower() != "bearer" or not separator or not credential.strip():
             raise AuthenticationError("bearer credential required")
         return credential.strip()
 
     def _json_body(self):
+        if len(self.headers.get_all("Content-Type", [])) != 1:
+            raise ValueError("exactly one Content-Type is required")
         if self.headers.get_content_type() != "application/json":
             raise ValueError("Content-Type must be application/json")
-        raw_length = self.headers.get("Content-Length")
-        if raw_length is None:
-            raise ValueError("Content-Length is required")
-        try:
-            length = int(raw_length)
-        except ValueError as exc:
-            raise ValueError("invalid Content-Length") from exc
+        if self.headers.get_all("Transfer-Encoding", []):
+            raise ValueError("Transfer-Encoding is not supported")
+        if self.headers.get_all("Content-Encoding", []):
+            raise ValueError("Content-Encoding is not supported")
+        lengths = self.headers.get_all("Content-Length", [])
+        if len(lengths) != 1:
+            raise ValueError("exactly one Content-Length is required")
+        raw_length = lengths[0]
+        if not raw_length.isascii() or not raw_length.isdecimal():
+            raise ValueError("invalid Content-Length")
+        length = int(raw_length)
         if not 0 <= length <= MAX_REQUEST_BYTES:
             raise ValueError("request body exceeds the permitted size")
         raw = self.rfile.read(length)
