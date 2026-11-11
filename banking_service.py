@@ -52,6 +52,10 @@ class BankingService:
             account_type=account_type,
         )
 
+    def currencies(self, credential):
+        self._owner_ref(credential)
+        return self.ledger.currencies()
+
     def accounts(self, credential):
         owner_ref = self._owner_ref(credential)
         return self.ledger.accounts_for_owner(owner_ref)
