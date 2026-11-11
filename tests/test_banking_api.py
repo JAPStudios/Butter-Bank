@@ -1,3 +1,4 @@
+import http.client
 import json
 import tempfile
 import threading
@@ -6,7 +7,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from banking_api import create_server
+from banking_api import MAX_REQUEST_BYTES, create_server
 from banking_service import BankingService
 from financial_ledger import FinancialLedger
 
@@ -110,6 +111,21 @@ class BankingAPITests(unittest.TestCase):
         })
         self.assertEqual(status, 400)
         self.assertEqual(self.ledger.balance_minor(self.owner_a), 5000)
+
+    def test_oversized_request_body_is_rejected_and_connection_closed(self):
+        connection = http.client.HTTPConnection(
+            "127.0.0.1", self.server.server_address[1], timeout=3
+        )
+        connection.putrequest("POST", "/accounts")
+        connection.putheader("Authorization", "Bearer token-a")
+        connection.putheader("Content-Type", "application/json")
+        connection.putheader("Content-Length", str(MAX_REQUEST_BYTES + 1))
+        connection.endheaders()
+        response = connection.getresponse()
+        self.assertEqual(response.status, 400)
+        self.assertEqual(response.getheader("Connection"), "close")
+        response.read()
+        connection.close()
 
     def test_invalid_credential_and_unsupported_method_are_rejected(self):
         status, body = self.request("GET", "/accounts", "invalid-token")
