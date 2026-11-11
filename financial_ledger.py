@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import stat
 import sqlite3
 import threading
 import uuid
@@ -40,9 +42,26 @@ class FinancialLedger:
 
     def __init__(self, path):
         self.path = str(path)
-        if self.path != ":memory:" and Path(self.path).is_symlink():
-            raise LedgerError("ledger database must not be a symbolic link")
         self._lock = threading.RLock()
+        if self.path != ":memory:":
+            database_path = Path(self.path)
+            database_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            if database_path.is_symlink():
+                raise LedgerError("ledger database must not be a symbolic link")
+            flags = os.O_CREAT | os.O_RDWR
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+            try:
+                descriptor = os.open(str(database_path), flags, 0o600)
+            except OSError as exc:
+                raise LedgerError("ledger database cannot be opened safely") from exc
+            try:
+                if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                    raise LedgerError("ledger database must be a regular file")
+                if os.name == "posix":
+                    os.fchmod(descriptor, 0o600)
+            finally:
+                os.close(descriptor)
         self._db = sqlite3.connect(
             self.path, isolation_level=None, check_same_thread=False, timeout=30
         )
@@ -52,6 +71,8 @@ class FinancialLedger:
         if self.path != ":memory:":
             self._db.execute("PRAGMA journal_mode = WAL")
             self._db.execute("PRAGMA synchronous = FULL")
+            if os.name == "posix":
+                os.chmod(self.path, 0o600)
         self._create_schema()
         self.register_currency("USD", 2, "fiat")
         self.register_currency("JPY", 0, "fiat")
@@ -129,13 +150,14 @@ class FinancialLedger:
         return code
 
     def currency(self, code):
-        row = self._db.execute(
-            "SELECT code, minor_unit_exponent, asset_class FROM currencies WHERE code=?",
-            (self._text(code, "currency code").upper(),),
-        ).fetchone()
-        if row is None:
-            raise LedgerError("currency is not registered")
-        return dict(row)
+        with self._lock:
+            row = self._db.execute(
+                "SELECT code, minor_unit_exponent, asset_class FROM currencies WHERE code=?",
+                (self._text(code, "currency code").upper(),),
+            ).fetchone()
+            if row is None:
+                raise LedgerError("currency is not registered")
+            return dict(row)
 
     def create_account(
         self, owner_ref, currency_code, account_type="deposit",
@@ -160,25 +182,27 @@ class FinancialLedger:
         return account_id
 
     def account(self, account_id):
-        row = self._db.execute(
-            "SELECT account_id, owner_ref, currency_code, account_type, "
-            "allow_negative, created_at FROM accounts WHERE account_id=?",
-            (self._text(account_id, "account ID"),),
-        ).fetchone()
-        if row is None:
-            raise LedgerError("account does not exist")
-        result = dict(row)
-        result["allow_negative"] = bool(result["allow_negative"])
-        return result
+        with self._lock:
+            row = self._db.execute(
+                "SELECT account_id, owner_ref, currency_code, account_type, "
+                "allow_negative, created_at FROM accounts WHERE account_id=?",
+                (self._text(account_id, "account ID"),),
+            ).fetchone()
+            if row is None:
+                raise LedgerError("account does not exist")
+            result = dict(row)
+            result["allow_negative"] = bool(result["allow_negative"])
+            return result
 
     def balance_minor(self, account_id):
-        self.account(account_id)
-        row = self._db.execute(
-            "SELECT COALESCE(SUM(amount_minor), 0) AS balance "
-            "FROM journal_entries WHERE account_id=?",
-            (account_id,),
-        ).fetchone()
-        return row["balance"]
+        with self._lock:
+            self.account(account_id)
+            row = self._db.execute(
+                "SELECT COALESCE(SUM(amount_minor), 0) AS balance "
+                "FROM journal_entries WHERE account_id=?",
+                (account_id,),
+            ).fetchone()
+            return row["balance"]
 
     @staticmethod
     def _canonical_posting(description, currency, entries):
@@ -281,18 +305,19 @@ class FinancialLedger:
                 raise
 
     def journal(self, account_id, limit=100):
-        self.account(account_id)
-        if (not isinstance(limit, int) or isinstance(limit, bool)
-                or not 1 <= limit <= 1000):
-            raise LedgerError("journal limit must be between 1 and 1000")
-        rows = self._db.execute(
-            "SELECT t.transaction_id, t.idempotency_key, t.description, "
-            "t.created_at, e.amount_minor FROM journal_entries e "
-            "JOIN journal_transactions t USING(transaction_id) "
-            "WHERE e.account_id=? ORDER BY e.entry_id DESC LIMIT ?",
-            (account_id, limit),
-        ).fetchall()
-        return [dict(row) for row in rows]
+        with self._lock:
+            self.account(account_id)
+            if (not isinstance(limit, int) or isinstance(limit, bool)
+                    or not 1 <= limit <= 1000):
+                raise LedgerError("journal limit must be between 1 and 1000")
+            rows = self._db.execute(
+                "SELECT t.transaction_id, t.idempotency_key, t.description, "
+                "t.created_at, e.amount_minor FROM journal_entries e "
+                "JOIN journal_transactions t USING(transaction_id) "
+                "WHERE e.account_id=? ORDER BY e.entry_id DESC LIMIT ?",
+                (account_id, limit),
+            ).fetchall()
+            return [dict(row) for row in rows]
 
     def close(self):
         with self._lock:
