@@ -44,7 +44,7 @@ account_id = ledger.create_account(
     currency_code="USD",
     account_type="deposit",
 )
-accounts = ledger.accounts_for_owner("trusted-principal-reference")
+accounts = ledger.accounts_for_owner("trusted-account-owner-reference")
 ```
 
 The owner reference is an opaque value used to associate ledger accounts with the JaMail account that owns them. The ledger does not authenticate that value. It must be derived from a verified JaMail session or credential; a client must never be allowed to choose an owner reference in a request.
@@ -105,7 +105,7 @@ A JaMail HTTPS credential-introspection adapter is present in jamail_identity.py
 Butter Bank includes a JaMail introspection adapter in jamail_identity.py and a service factory in banking_runtime.py. The adapter sends an opaque bearer credential to a configured HTTPS endpoint using an authenticated service-client credential. It expects a JSON response containing active, iss, aud, sub, and exp fields. These names and meanings are the adapter's proposed interface, not evidence of an already deployed JaMail API. The sub field is treated by this adapter as the owner reference returned after credential validation.
 
 Configure the Butter Bank process with these runtime settings:
-- JAMAIL_INTROSPECTION_URL: JaMail's HTTPS introspection endpoint.
+- JAMAIL_INTROSPECTION_URL: HTTPS URL of the credential-validation endpoint configured to check JaMail credentials; this endpoint is not supplied by the adapter itself.
 - JAMAIL_INTROSPECTION_CLIENT_ID: Butter Bank's registered JaMail service-client ID.
 - JAMAIL_INTROSPECTION_CLIENT_SECRET: secret issued to that service client.
 - JAMAIL_ISSUER: exact JaMail token issuer.
