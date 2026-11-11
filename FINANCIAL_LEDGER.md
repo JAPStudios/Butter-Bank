@@ -40,7 +40,7 @@ The example above is only a syntax example. It does not establish the Biscuits d
 
 ```python
 account_id = ledger.create_account(
-    owner_ref="trusted-principal-reference",
+    owner_ref="trusted-account-owner-reference",
     currency_code="USD",
     account_type="deposit",
 )
@@ -80,27 +80,27 @@ This module does not yet provide:
 - A public HTTP/API service, customer onboarding, account recovery, or permissions administration.
 - External deposits, withdrawals, card issuing, ACH, wire, instant payment, merchant settlement, or reconciliation.
 - Credit underwriting, lending, interest accrual, savings yields, fees, payroll, tax reporting, investment brokerage, or government-benefit integrations.
-- Encryption of the SQLite database at rest, key management for customer identity, replicated storage, or production disaster recovery.
+- Encryption of the SQLite database at rest, key management for customer authentication, replicated storage, or production disaster recovery.
 
 Do not place real customer funds or production credentials in this development ledger. Those capabilities require separate designs, provider integrations, regulatory authorization, security review, and operational controls.
 
 ## Authenticated application-service boundary
 
-`banking_service.py` exposes account opening, account listing, owner-scoped statements, and internal transfers through an injected identity resolver:
+`banking_service.py` exposes account opening, account listing, owner-scoped statements, and internal transfers through an injected account-owner resolver:
 
 ```python
 from banking_service import BankingService
 from financial_ledger import FinancialLedger
 
 ledger = FinancialLedger("data/butter-bank.sqlite3")
-service = BankingService(ledger, principal_resolver=trusted_identity_resolver)
+service = BankingService(ledger, account_owner_resolver=trusted_account_owner_resolver)
 ```
 
 The resolver receives an opaque credential and must validate it before returning the owner reference associated with the JaMail account used for the request. The service rejects missing or invalid credentials and does not accept an owner reference from the client.
 
 A JaMail HTTPS credential-introspection adapter is present in jamail_identity.py. Its expected request and response format was authored for that adapter in this repository; it must not be mistaken for an existing JaMail endpoint or API. Do not connect it to an unverified resolver, hardcode signing secrets, or treat a client-provided owner reference as authentication.
 
-## JaMail identity integration
+## JaMail credential integration
 
 Butter Bank includes a JaMail introspection adapter in jamail_identity.py and a service factory in banking_runtime.py. The adapter sends an opaque bearer credential to a configured HTTPS endpoint using an authenticated service-client credential. It expects a JSON response containing active, iss, aud, sub, and exp fields. These names and meanings are the adapter's proposed interface, not evidence of an already deployed JaMail API. The sub field is treated by this adapter as the owner reference returned after credential validation.
 
@@ -126,7 +126,7 @@ server = create_server(service, host="127.0.0.1", port=8000)
 server.serve_forever()
 ```
 
-Every supported route requires an `Authorization: Bearer <credential>` header. The credential is passed to the injected identity resolver; the HTTP API never accepts an owner reference in a request body.
+Every supported route requires an `Authorization: Bearer <credential>` header. The credential is passed to the injected account-owner resolver; the HTTP API never accepts an owner reference in a request body.
 
 | Method | Route | Purpose |
 |---|---|---|
@@ -136,4 +136,4 @@ Every supported route requires an `Authorization: Bearer <credential>` header. T
 | GET | `/accounts/{account_id}/statement?limit=100` | Read an owner's account statement |
 | POST | `/transfers` | Transfer integer minor units between internal accounts |
 
-JSON request bodies are limited to 64 KiB. The API does not expose arbitrary journal posting, deposits, withdrawals, card authorization, or external payment settlement. It has no built-in TLS termination, rate limiting, or production identity provider. Keep it on loopback until a verified JaMail identity adapter and an authenticated TLS reverse proxy are configured.
+JSON request bodies are limited to 64 KiB. The API does not expose arbitrary journal posting, deposits, withdrawals, card authorization, or external payment settlement. It has no built-in TLS termination, rate limiting, or production credential-validation provider. Keep it on loopback until a verified JaMail credential-validation adapter and an authenticated TLS reverse proxy are configured.
