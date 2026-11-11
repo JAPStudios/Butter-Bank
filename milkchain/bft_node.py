@@ -9,13 +9,12 @@ import stat
 import time
 import threading
 from pathlib import Path
-from http.server import ThreadingHTTPServer
+from consensus_network import BoundedThreadingHTTPServer, ConsensusHTTPServer
 from urllib.parse import urlparse
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from consensus import make_proposal, select_proposer
-from consensus_network import ConsensusHTTPServer
 from engine import ConsensusEngine
 from signer import ConsensusSigner
 from bft_chain import BFTChain
@@ -23,11 +22,17 @@ from node import API, synchronize_peer
 
 
 LOGGER = logging.getLogger(__name__)
+DEFAULT_BFT_API_MAX_WORKERS = 32
+BFT_API_SOCKET_TIMEOUT_SECONDS = 10
 
 
 class BFTAPI(API):
     consensus_server = None
     consensus_key = None
+
+    def setup(self):
+        super().setup()
+        self.connection.settimeout(BFT_API_SOCKET_TIMEOUT_SECONDS)
 
     def do_POST(self):
         if urlparse(self.path).path != "/propose":
@@ -245,6 +250,17 @@ def bft_round_timeout_loop(consensus_server, initial_timeout=10.0,
         timeout = min(timeout * 2, float(maximum_timeout))
 
 
+def create_api_server(host="127.0.0.1", port=8333, max_workers=DEFAULT_BFT_API_MAX_WORKERS):
+    """Create the loopback-only BFT node API with bounded request concurrency."""
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        raise ValueError("BFT node API must bind to a loopback address")
+    if not isinstance(port, int) or isinstance(port, bool) or not 0 <= port <= 65535:
+        raise ValueError("BFT node API port must be an integer from 0 through 65535")
+    return BoundedThreadingHTTPServer(
+        (host, port), BFTAPI, max_workers=max_workers
+    )
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="config.json")
@@ -340,8 +356,8 @@ def main():
     BFTAPI.consensus_key = key
 
     try:
-        http_server = ThreadingHTTPServer(
-            (api_host, int(cfg.get("port", 8333))), BFTAPI
+        http_server = create_api_server(
+            api_host, int(cfg.get("port", 8333))
         )
     except Exception:
         consensus_server.server.server_close()
