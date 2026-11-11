@@ -1,12 +1,13 @@
-"""Production configuration helpers for the Butter Bank service."""
+"""Runtime factory for the Butter Bank application service."""
+from collections.abc import Callable
+
 from banking_service import BankingService
 from financial_ledger import FinancialLedger
-from jamail_identity import JaMailIntrospectionResolver
 
-def create_jamail_banking_service(ledger: FinancialLedger) -> BankingService:
-    """Create a fail-closed service using JaMail HTTPS introspection.
 
-    The JaMail endpoint must implement the documented response contract
-    before this factory can authenticate real JaMail sessions.
-    """
-    return BankingService(ledger, JaMailIntrospectionResolver.from_env())
+def create_banking_service(
+    ledger: FinancialLedger,
+    account_owner_resolver: Callable[[object], str],
+) -> BankingService:
+    """Create the service with the credential validator for the account source."""
+    return BankingService(ledger, account_owner_resolver)
