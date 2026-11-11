@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from banking_service import AuthenticationError, BankingService
+from banking_runtime import create_banking_service
 from financial_ledger import FinancialLedger, LedgerError
 
 
@@ -67,9 +68,17 @@ class BankingServiceTests(unittest.TestCase):
         with self.assertRaises(AuthenticationError):
             failing.accounts("bad-token")
 
-    def test_identity_resolver_is_mandatory(self):
+    def test_account_owner_resolver_is_mandatory(self):
         with self.assertRaises(TypeError):
             BankingService(self.ledger, None)
+
+    def test_runtime_factory_uses_the_supplied_account_owner_resolver(self):
+        service = create_banking_service(self.ledger, lambda credential: "owner-a")
+        self.assertEqual(
+            {item["account_id"] for item in service.accounts("credential")},
+            {self.owner_a},
+        )
+
 
 
 if __name__ == "__main__":
