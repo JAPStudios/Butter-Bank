@@ -165,6 +165,15 @@ class FinancialLedger:
                 raise LedgerError("currency is not registered")
             return dict(row)
 
+    def currencies(self):
+        """Return the registered currency and asset precision catalog."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT code, minor_unit_exponent, asset_class "
+                "FROM currencies ORDER BY code"
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def create_account(
         self, owner_ref, currency_code, account_type="deposit",
         allow_negative=False, account_id=None,

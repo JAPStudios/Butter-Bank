@@ -88,6 +88,11 @@ class BankingAPIHandler(BaseHTTPRequestHandler):
         def operation():
             credential = self._credential()
             parsed = urlsplit(self.path)
+            if parsed.path == "/currencies":
+                if parsed.query:
+                    raise ValueError("query parameters are not supported on this route")
+                self._send_json(200, {"currencies": self.service.currencies(credential)})
+                return
             if parsed.path == "/accounts":
                 if parsed.query:
                     raise ValueError("query parameters are not supported on this route")
