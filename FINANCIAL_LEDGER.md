@@ -98,7 +98,22 @@ service = BankingService(ledger, principal_resolver=trusted_identity_resolver)
 
 The resolver receives an opaque credential and must validate it before returning a stable owner reference. It is responsible for verifying the credential's signature, issuer, audience, expiry, and revocation status. The service rejects missing or invalid principals and does not accept an owner reference from the client.
 
-No production JaMail identity adapter is connected yet. Do not supply an unverified resolver, hardcode token-signing secrets, or treat a client-provided account owner reference as authentication. Account access must remain disabled until a trusted JaMail credential-validation contract is available and independently tested.
+A JaMail HTTPS introspection adapter is implemented in jamail_identity.py, but it cannot authenticate real sessions until JaMail provides the matching introspection endpoint, stable account-subject contract, and service-client credentials. Do not supply an unverified resolver, hardcode token-signing secrets, or treat a client-provided account owner reference as authentication. Account access must remain disabled until the JaMail-side contract is deployed and independently tested.
+
+## JaMail identity integration
+
+Butter Bank includes a JaMail introspection adapter in jamail_identity.py and a service factory in banking_runtime.py. The adapter sends opaque bearer credentials to JaMail over HTTPS using an authenticated service-client credential. It fails closed unless JaMail returns an active credential with the exact configured issuer, the Butter Bank audience, a stable JaMail account ID in sub, and a future exp timestamp. JaMail must check current token revocation state when answering introspection requests.
+
+Configure the Butter Bank process with these runtime settings:
+- JAMAIL_INTROSPECTION_URL: JaMail's HTTPS introspection endpoint.
+- JAMAIL_INTROSPECTION_CLIENT_ID: Butter Bank's registered JaMail service-client ID.
+- JAMAIL_INTROSPECTION_CLIENT_SECRET: secret issued to that service client.
+- JAMAIL_ISSUER: exact JaMail token issuer.
+- BUTTER_BANK_JAMAIL_AUDIENCE: audience registered for Butter Bank.
+
+Create the service with create_jamail_banking_service(ledger). Do not commit service credentials or place them in source control. The HTTP API continues to bind to loopback by default.
+
+Integration status: the Butter Bank adapter and its validation tests are implemented. The current JaMail repository does not yet contain a working introspection endpoint, a stable account-subject contract, or a configured service-client credential flow. Therefore the adapter cannot authenticate real JaMail sessions until those JaMail-side components are implemented and deployed. It deliberately fails closed rather than accepting demo credentials or trusting an unverified token.
 
 ## Local HTTP API
 
