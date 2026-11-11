@@ -151,6 +151,18 @@ class FinancialLedgerTests(unittest.TestCase):
         self.assertEqual(self.ledger.balance_minor(self.usd_a), 100)
         self.assertEqual(self.ledger.balance_minor(self.usd_b), 0)
 
+    def test_account_balance_cannot_overflow_signed_64_bit_range(self):
+        maximum = 2**63 - 1
+        self.ledger.post("max-balance", "Maximum supported balance", [
+            (self.usd_a, maximum), (self.usd_clearing, -maximum),
+        ])
+        with self.assertRaisesRegex(LedgerError, "account-balance range"):
+            self.ledger.post("overflow", "Overflow attempt", [
+                (self.usd_a, 1), (self.usd_clearing, -1),
+            ])
+        self.assertEqual(self.ledger.balance_minor(self.usd_a), maximum)
+        self.assertEqual(self.ledger.balance_minor(self.usd_clearing), -maximum)
+
     def test_internal_transfer_rejects_invalid_amount(self):
         for amount in (0, -1, True, 1.5):
             with self.subTest(amount=amount):

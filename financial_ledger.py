@@ -18,6 +18,8 @@ from pathlib import Path
 
 
 _CURRENCY_CODE = re.compile(r"^[A-Z][A-Z0-9]{2,11}$")
+_MIN_INT64 = -(2**63)
+_MAX_INT64 = 2**63 - 1
 
 
 class LedgerError(ValueError):
@@ -211,15 +213,20 @@ class FinancialLedger:
                 result.append(item)
             return result
 
+    def _balance_minor_unlocked(self, account_id):
+        rows = self._db.execute(
+            "SELECT amount_minor FROM journal_entries WHERE account_id=?",
+            (account_id,),
+        ).fetchall()
+        balance = sum(row["amount_minor"] for row in rows)
+        if not _MIN_INT64 <= balance <= _MAX_INT64:
+            raise LedgerError("account balance exceeds the supported integer range")
+        return balance
+
     def balance_minor(self, account_id):
         with self._lock:
             self.account(account_id)
-            row = self._db.execute(
-                "SELECT COALESCE(SUM(amount_minor), 0) AS balance "
-                "FROM journal_entries WHERE account_id=?",
-                (account_id,),
-            ).fetchone()
-            return row["balance"]
+            return self._balance_minor_unlocked(account_id)
 
     @staticmethod
     def _canonical_posting(description, currency, entries):
@@ -292,15 +299,17 @@ class FinancialLedger:
                     return prior["transaction_id"]
 
                 for row, amount in account_rows:
-                    if not row["allow_negative"]:
-                        current = self._db.execute(
-                            "SELECT COALESCE(SUM(amount_minor), 0) FROM journal_entries "
-                            "WHERE account_id=?", (row["account_id"],),
-                        ).fetchone()[0]
-                        if current + amount < 0:
-                            raise InsufficientFunds(
-                                "posting would make account negative: " + row["account_id"]
-                            )
+                    current = self._balance_minor_unlocked(row["account_id"])
+                    next_balance = current + amount
+                    if not _MIN_INT64 <= next_balance <= _MAX_INT64:
+                        raise LedgerError(
+                            "posting would exceed the supported account-balance range: "
+                            + row["account_id"]
+                        )
+                    if not row["allow_negative"] and next_balance < 0:
+                        raise InsufficientFunds(
+                            "posting would make account negative: " + row["account_id"]
+                        )
 
                 transaction_id = str(uuid.uuid4())
                 created_at = datetime.now(timezone.utc).isoformat()
