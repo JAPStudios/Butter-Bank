@@ -47,7 +47,7 @@ account_id = ledger.create_account(
 accounts = ledger.accounts_for_owner("trusted-account-owner-reference")
 ```
 
-The owner reference is an opaque value used to associate ledger accounts with the JaMail account that owns them. The ledger does not authenticate that value. It must be derived from a verified JaMail session or credential; a client must never be allowed to choose an owner reference in a request.
+The owner reference is an opaque value used to group ledger accounts under one access scope. The ledger does not authenticate or interpret that value. A trusted caller supplies it after applying the deployment's credential-validation policy; an untrusted client must never choose the reference in a request.
 
 ## Internal transfers
 
@@ -62,9 +62,9 @@ transaction_id = ledger.transfer(
 )
 ```
 
-The caller must pass the owner reference returned by the trusted credential-validation layer. The source account must belong to that JaMail account. The destination may belong to a different account owner. Both accounts must use the same currency. The journal posts the debit and credit atomically, rejects overdrafts by default, and returns the original transaction ID when the same idempotent request is retried.
+The caller must pass the owner reference returned by the configured trusted resolver. The source account must match that reference. The destination may be grouped under a different owner reference. Both accounts must use the same currency. The journal posts the debit and credit atomically, rejects overdrafts by default, and returns the original transaction ID when the same idempotent request is retried.
 
-The idempotency key must be unique for each distinct operation by the same account owner. Transfer keys are scoped to the authenticated account-owner reference, so different JaMail accounts may independently use the same key. Reusing a key for different journal content within one account owner is rejected.
+The idempotency key must be unique for each distinct operation by the same account owner. Transfer keys are scoped to the account-owner reference, so separate owner scopes may independently use the same key. Reusing a key for different journal content within one account owner is rejected.
 
 ## Ledger integrity audit
 
@@ -80,7 +80,7 @@ Direct posting is an internal accounting primitive. It must not be exposed direc
 
 This module does not yet provide:
 
-- Customer authentication or JaMail session validation.
+- A built-in credential source, credential format, or upstream account/session protocol.
 - A public HTTP/API service, customer onboarding, account recovery, or permissions administration.
 - External deposits, withdrawals, card issuing, ACH, wire, instant payment, merchant settlement, or reconciliation.
 - Credit underwriting, lending, interest accrual, savings yields, fees, payroll, tax reporting, investment brokerage, or government-benefit integrations.
@@ -100,9 +100,9 @@ ledger = FinancialLedger("data/butter-bank.sqlite3")
 service = create_banking_service(ledger, account_owner_resolver)
 ```
 
-The resolver receives the credential supplied with the request and must validate it against JaMail's actual account and session implementation before returning the owner reference used by the ledger. The service rejects missing or invalid credentials and never accepts an owner reference from a request body. This repository does not define a JaMail authentication protocol or substitute a proposed response format for JaMail's actual implementation.
+The resolver receives the credential supplied with the request and returns the owner reference used by the ledger only after applying the deployment's actual credential-validation policy. The service rejects missing or invalid credentials and never accepts an owner reference from a request body. The resolver is supplied by the deployment; this repository does not define an upstream credential source or invent a protocol for one.
 
-`create_banking_service()` accepts the resolver directly. No JaMail-specific endpoint, token format, account identifier field, or service-client credential is assumed by Butter Bank.
+`create_banking_service()` accepts the resolver directly. No particular endpoint, token format, upstream account identifier, or service-client credential is assumed by Butter Bank.
 
 ## Local HTTP API
 
@@ -121,8 +121,8 @@ Every supported route requires an `Authorization: Bearer <credential>` header. T
 |---|---|---|
 | GET | `/currencies` | Read registered currency and asset precision metadata |
 | POST | `/accounts` | Open an account using `currency_code` and optional `account_type` |
-| GET | `/accounts` | List the authenticated owner's accounts |
+| GET | `/accounts` | List accounts in the resolved owner scope |
 | GET | `/accounts/{account_id}/statement?limit=100` | Read an owner's account statement |
 | POST | `/transfers` | Transfer integer minor units between internal accounts |
 
-JSON request bodies are limited to 64 KiB. The API does not expose arbitrary journal posting, deposits, withdrawals, card authorization, or external payment settlement. It has no built-in TLS termination, rate limiting, or production credential-validation provider. Keep it on loopback; remote access requires a separately designed authenticated TLS gateway. Credential-source outages return HTTP 503; invalid credentials return HTTP 401.
+JSON request bodies are limited to 64 KiB. The API does not expose arbitrary journal posting, deposits, withdrawals, card authorization, or external payment settlement. It has no built-in TLS termination or production credential source; request concurrency is bounded and stalled connections time out. Keep it on loopback; remote access requires a separately designed authenticated TLS gateway. Credential-source outages return HTTP 503; invalid credentials return HTTP 401.
