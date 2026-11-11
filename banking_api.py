@@ -10,7 +10,11 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from banking_service import AuthenticationError, BankingService
+from banking_service import (
+    AuthenticationError,
+    BankingService,
+    CredentialProviderUnavailable,
+)
 from financial_ledger import (
     AccountAccessDenied,
     IdempotencyConflict,
@@ -76,6 +80,9 @@ class BankingAPIHandler(BaseHTTPRequestHandler):
     def _handle_errors(self, operation):
         try:
             operation()
+        except CredentialProviderUnavailable:
+            self.close_connection = True
+            self._send_json(503, {"error": "credential_provider_unavailable"})
         except AuthenticationError:
             self.close_connection = True
             self._send_json(401, {"error": "unauthorized"})

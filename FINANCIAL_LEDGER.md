@@ -121,4 +121,4 @@ Every supported route requires an `Authorization: Bearer <credential>` header. T
 | GET | `/accounts/{account_id}/statement?limit=100` | Read an owner's account statement |
 | POST | `/transfers` | Transfer integer minor units between internal accounts |
 
-JSON request bodies are limited to 64 KiB. The API does not expose arbitrary journal posting, deposits, withdrawals, card authorization, or external payment settlement. It has no built-in TLS termination, rate limiting, or production credential-validation provider. Keep it on loopback until a verified JaMail credential-validation adapter and an authenticated TLS reverse proxy are configured.
+JSON request bodies are limited to 64 KiB. The API does not expose arbitrary journal posting, deposits, withdrawals, card authorization, or external payment settlement. It has no built-in TLS termination, rate limiting, or production credential-validation provider. Keep it on loopback until the actual JaMail credential validator and an authenticated TLS reverse proxy are configured. Credential-source outages return HTTP 503; invalid credentials return HTTP 401.

@@ -15,6 +15,10 @@ class AuthenticationError(PermissionError):
     """The supplied credential did not resolve to an account owner reference."""
 
 
+class CredentialProviderUnavailable(RuntimeError):
+    """The credential source could not be reached or did not respond."""
+
+
 class BankingService:
     """Expose ledger operations scoped to the account-owner reference returned by
     the configured credential resolver. The resolver receives an opaque
@@ -36,6 +40,8 @@ class BankingService:
     def _owner_ref(self, credential):
         try:
             owner_ref = self._account_owner_resolver(credential)
+        except CredentialProviderUnavailable:
+            raise
         except Exception as exc:
             raise AuthenticationError("credential could not be validated") from exc
         if not isinstance(owner_ref, str) or not owner_ref.strip():

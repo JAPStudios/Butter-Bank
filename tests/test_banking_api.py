@@ -135,6 +135,34 @@ class BankingAPITests(unittest.TestCase):
         response.read()
         connection.close()
 
+    def test_credential_provider_outage_returns_service_unavailable(self):
+        from banking_service import CredentialProviderUnavailable
+
+        def unavailable(credential):
+            raise CredentialProviderUnavailable("provider offline")
+
+        outage_server = create_server(
+            BankingService(self.ledger, unavailable), host="127.0.0.1", port=0
+        )
+        thread = threading.Thread(target=outage_server.serve_forever, daemon=True)
+        thread.start()
+        url = "http://127.0.0.1:" + str(outage_server.server_address[1])
+        request = urllib.request.Request(
+            url + "/accounts", headers={"Authorization": "Bearer token-a"}
+        )
+        try:
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(request, timeout=3)
+            self.assertEqual(caught.exception.code, 503)
+            self.assertEqual(
+                json.loads(caught.exception.read().decode("utf-8")),
+                {"error": "credential_provider_unavailable"},
+            )
+        finally:
+            outage_server.shutdown()
+            outage_server.server_close()
+            thread.join(timeout=2)
+
     def test_invalid_credential_and_unsupported_method_are_rejected(self):
         status, body = self.request("GET", "/accounts", "invalid-token")
         self.assertEqual(status, 401)

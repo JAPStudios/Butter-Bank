@@ -2,7 +2,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from banking_service import AuthenticationError, BankingService
+from banking_service import (
+    AuthenticationError,
+    BankingService,
+    CredentialProviderUnavailable,
+)
 from banking_runtime import create_banking_service
 from financial_ledger import FinancialLedger, LedgerError
 
@@ -67,6 +71,14 @@ class BankingServiceTests(unittest.TestCase):
         )
         with self.assertRaises(AuthenticationError):
             failing.accounts("bad-token")
+
+    def test_credential_provider_outage_is_not_misreported_as_invalid_credentials(self):
+        def unavailable(credential):
+            raise CredentialProviderUnavailable("provider offline")
+
+        service = BankingService(self.ledger, unavailable)
+        with self.assertRaises(CredentialProviderUnavailable):
+            service.accounts("credential-a")
 
     def test_account_owner_resolver_is_mandatory(self):
         with self.assertRaises(TypeError):
