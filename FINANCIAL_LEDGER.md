@@ -66,6 +66,10 @@ The caller must pass the owner reference returned by the trusted credential-vali
 
 The idempotency key must be unique for each distinct operation by the same account owner. Transfer keys are scoped to the authenticated account-owner reference, so different JaMail accounts may independently use the same key. Reusing a key for different journal content within one account owner is rejected.
 
+## Ledger integrity audit
+
+`verify_integrity()` runs SQLite's structural integrity and foreign-key checks, verifies that every journal transaction balances within one currency, recomputes each transaction's content hash, and checks account balance limits and overdraft rules. It returns counts for accounts, transactions, and entries when all checks pass. It detects accidental or direct journal-row changes that violate these checks; it is not a cryptographic defense against an administrator who can rewrite the entire database and recompute its hashes.
+
 ## Direct journal posting
 
 `post(idempotency_key, description, entries)` is the lower-level accounting operation. Each entry is a pair of account ID and signed integer minor-unit amount. At least two accounts are required, every account may appear only once, all entries must use the same currency, and the signed amounts must sum to zero.

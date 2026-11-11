@@ -411,6 +411,75 @@ class FinancialLedger:
                 [(source_id, -amount_minor), (destination_id, amount_minor)],
             )
 
+    def verify_integrity(self):
+        """Audit SQLite structure, balanced postings, content hashes, and balances."""
+        with self._lock:
+            integrity = [
+                row[0] for row in self._db.execute("PRAGMA integrity_check").fetchall()
+            ]
+            if integrity != ["ok"]:
+                raise LedgerError("SQLite database integrity check failed")
+            foreign_key_issues = self._db.execute(
+                "PRAGMA foreign_key_check"
+            ).fetchall()
+            if foreign_key_issues:
+                raise LedgerError("ledger contains foreign-key violations")
+
+            grouped = {}
+            rows = self._db.execute(
+                "SELECT t.transaction_id, t.content_hash, t.description, "
+                "e.account_id, e.amount_minor, a.currency_code "
+                "FROM journal_transactions t "
+                "LEFT JOIN journal_entries e USING(transaction_id) "
+                "LEFT JOIN accounts a USING(account_id) "
+                "ORDER BY t.transaction_id, e.account_id"
+            ).fetchall()
+            for row in rows:
+                transaction_id = row["transaction_id"]
+                record = grouped.setdefault(transaction_id, {
+                    "content_hash": row["content_hash"],
+                    "description": row["description"],
+                    "entries": [],
+                    "currencies": set(),
+                })
+                if row["account_id"] is None or row["currency_code"] is None:
+                    raise LedgerError("journal transaction has missing account entries")
+                record["entries"].append(
+                    (row["account_id"], row["amount_minor"])
+                )
+                record["currencies"].add(row["currency_code"])
+
+            entry_count = 0
+            for record in grouped.values():
+                entries = record["entries"]
+                entry_count += len(entries)
+                if len(entries) < 2 or len(record["currencies"]) != 1:
+                    raise LedgerError("journal transaction has invalid account entries")
+                if sum(amount for _, amount in entries) != 0:
+                    raise LedgerError("journal transaction does not balance to zero")
+                currency = next(iter(record["currencies"]))
+                canonical = self._canonical_posting(
+                    record["description"], currency, entries
+                )
+                digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+                if digest != record["content_hash"]:
+                    raise LedgerError("journal transaction content hash mismatch")
+
+            account_rows = self._db.execute(
+                "SELECT account_id, allow_negative FROM accounts ORDER BY account_id"
+            ).fetchall()
+            for row in account_rows:
+                balance = self._balance_minor_unlocked(row["account_id"])
+                if not row["allow_negative"] and balance < 0:
+                    raise LedgerError("non-overdraft account has a negative balance")
+
+            return {
+                "ok": True,
+                "accounts": len(account_rows),
+                "transactions": len(grouped),
+                "entries": entry_count,
+            }
+
     def close(self):
         with self._lock:
             if self._db is not None:

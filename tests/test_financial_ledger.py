@@ -29,6 +29,53 @@ class FinancialLedgerTests(unittest.TestCase):
         self.ledger.close()
         self.temp.cleanup()
 
+    def test_integrity_audit_accepts_balanced_journal_and_reports_counts(self):
+        self.ledger.post("audit-usd", "Audit USD entry", [
+            (self.usd_a, 1250), (self.usd_clearing, -1250),
+        ])
+        self.ledger.post("audit-jpy", "Audit JPY entry", [
+            (self.jpy_a, 5000), (self.jpy_clearing, -5000),
+        ])
+        result = self.ledger.verify_integrity()
+        self.assertEqual(result, {
+            "ok": True,
+            "accounts": 6,
+            "transactions": 2,
+            "entries": 4,
+        })
+
+    def test_integrity_audit_detects_unbalanced_journal_tampering(self):
+        self.ledger.post("audit-tamper", "Tamper test", [
+            (self.usd_a, 100), (self.usd_clearing, -100),
+        ])
+        self.ledger._db.execute(
+            "UPDATE journal_entries SET amount_minor=amount_minor+1 "
+            "WHERE transaction_id=(SELECT transaction_id FROM journal_transactions "
+            "WHERE idempotency_key='audit-tamper') AND account_id=?",
+            (self.usd_a,),
+        )
+        with self.assertRaisesRegex(LedgerError, "does not balance"):
+            self.ledger.verify_integrity()
+
+    def test_integrity_audit_detects_balanced_journal_content_tampering(self):
+        self.ledger.post("audit-content", "Content test", [
+            (self.usd_a, 100), (self.usd_clearing, -100),
+        ])
+        self.ledger._db.execute(
+            "UPDATE journal_entries SET amount_minor=amount_minor+1 "
+            "WHERE transaction_id=(SELECT transaction_id FROM journal_transactions "
+            "WHERE idempotency_key='audit-content') AND account_id=?",
+            (self.usd_a,),
+        )
+        self.ledger._db.execute(
+            "UPDATE journal_entries SET amount_minor=amount_minor-1 "
+            "WHERE transaction_id=(SELECT transaction_id FROM journal_transactions "
+            "WHERE idempotency_key='audit-content') AND account_id=?",
+            (self.usd_clearing,),
+        )
+        with self.assertRaisesRegex(LedgerError, "content hash mismatch"):
+            self.ledger.verify_integrity()
+
     def test_usd_uses_cents_and_jpy_uses_whole_yen(self):
         self.assertEqual(self.ledger.currency("USD")["minor_unit_exponent"], 2)
         self.assertEqual(self.ledger.currency("JPY")["minor_unit_exponent"], 0)
