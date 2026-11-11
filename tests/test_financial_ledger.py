@@ -106,6 +106,20 @@ class FinancialLedgerTests(unittest.TestCase):
         )
         self.assertTrue(all(item["owner_ref"] == "customer-a" for item in accounts))
 
+    def test_statement_is_owner_scoped_and_returns_exact_balance(self):
+        self.ledger.post("statement-fund", "Fund statement account", [
+            (self.usd_a, 3456), (self.usd_clearing, -3456),
+        ])
+        statement = self.ledger.statement_for_owner("customer-a", self.usd_a)
+        self.assertEqual(statement["account"]["account_id"], self.usd_a)
+        self.assertEqual(statement["account"]["currency_code"], "USD")
+        self.assertEqual(statement["balance_minor"], 3456)
+        self.assertEqual(len(statement["entries"]), 1)
+        with self.assertRaisesRegex(LedgerError, "not owned"):
+            self.ledger.statement_for_owner("customer-b", self.usd_a)
+        with self.assertRaisesRegex(LedgerError, "not owned"):
+            self.ledger.account_for_owner("customer-b", self.usd_a)
+
     def test_internal_transfer_checks_owner_and_preserves_balances(self):
         self.ledger.post("fund-a", "Fund source account", [
             (self.usd_a, 1200), (self.usd_clearing, -1200),
