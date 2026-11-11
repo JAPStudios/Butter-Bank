@@ -35,7 +35,7 @@ class InsufficientFunds(LedgerError):
 
 
 class AccountAccessDenied(LedgerError):
-    """An authenticated principal attempted to access another owner's account."""
+    """An authenticated account-owner reference did not match the account owner."""
 
 
 class FinancialLedger:
@@ -215,7 +215,7 @@ class FinancialLedger:
         with self._lock:
             account = self.account(account_id)
             if account["owner_ref"] != owner_ref:
-                raise AccountAccessDenied("account is not owned by the authenticated principal")
+                raise AccountAccessDenied("account is not owned by the authenticated account owner")
             return account
 
     def accounts_for_owner(self, owner_ref):
@@ -400,7 +400,7 @@ class FinancialLedger:
             source = self.account(source_id)
             destination = self.account(destination_id)
             if source["owner_ref"] != owner_ref:
-                raise AccountAccessDenied("source account is not owned by the authenticated principal")
+                raise AccountAccessDenied("source account is not owned by the authenticated account owner")
             if source["currency_code"] != destination["currency_code"]:
                 raise LedgerError("one transfer cannot mix currencies")
             return self.post(
