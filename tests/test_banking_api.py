@@ -24,8 +24,8 @@ class BankingAPITests(unittest.TestCase):
         self.ledger.post("fund-owner-a", "Test funding entry", [
             (self.owner_a, 5000), (self.clearing, -5000),
         ])
-        principals = {"token-a": "owner-a", "token-b": "owner-b"}
-        service = BankingService(self.ledger, principals.get)
+        account_owners = {"token-a": "owner-a", "token-b": "owner-b"}
+        service = BankingService(self.ledger, account_owners.get)
         self.server = create_server(service, host="127.0.0.1", port=0)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
