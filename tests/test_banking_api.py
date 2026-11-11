@@ -25,8 +25,8 @@ class BankingAPITests(unittest.TestCase):
             (self.owner_a, 5000), (self.clearing, -5000),
         ])
         account_owners = {"token-a": "owner-a", "token-b": "owner-b"}
-        service = BankingService(self.ledger, account_owners.get)
-        self.server = create_server(service, host="127.0.0.1", port=0)
+        self.service = BankingService(self.ledger, account_owners.get)
+        self.server = create_server(self.service, host="127.0.0.1", port=0)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.base_url = "http://127.0.0.1:" + str(self.server.server_address[1])
@@ -162,6 +162,20 @@ class BankingAPITests(unittest.TestCase):
             outage_server.shutdown()
             outage_server.server_close()
             thread.join(timeout=2)
+
+    def test_server_refuses_non_loopback_bind_addresses(self):
+        for host in ("0.0.0.0", "192.0.2.10", "::1", "localhost"):
+            with self.subTest(host=host), self.assertRaisesRegex(
+                ValueError, "IPv4 loopback"
+            ):
+                create_server(self.service, host=host, port=0)
+
+    def test_server_rejects_invalid_port_values(self):
+        for port in (-1, 65536, True, "8000"):
+            with self.subTest(port=port), self.assertRaisesRegex(
+                ValueError, "port must be an integer"
+            ):
+                create_server(self.service, host="127.0.0.1", port=port)
 
     def test_invalid_credential_and_unsupported_method_are_rejected(self):
         status, body = self.request("GET", "/accounts", "invalid-token")

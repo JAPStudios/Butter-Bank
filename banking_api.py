@@ -6,6 +6,7 @@ references from request bodies and does not implement external payment settlemen
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -185,9 +186,19 @@ class BankingAPIHandler(BaseHTTPRequestHandler):
 
 
 def create_server(service: BankingService, host="127.0.0.1", port=8000):
-    """Create a threaded API server; remote exposure requires a TLS proxy."""
+    """Create a threaded API server bound only to an IPv4 loopback address."""
     if not isinstance(service, BankingService):
         raise TypeError("service must be a BankingService")
+    if not isinstance(host, str):
+        raise TypeError("host must be an IPv4 loopback address")
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError as exc:
+        raise ValueError("banking API host must be an IPv4 loopback address") from exc
+    if not isinstance(address, ipaddress.IPv4Address) or not address.is_loopback:
+        raise ValueError("banking API host must be an IPv4 loopback address")
+    if not isinstance(port, int) or isinstance(port, bool) or not 0 <= port <= 65535:
+        raise ValueError("port must be an integer from 0 through 65535")
     handler = type("ConfiguredBankingAPIHandler", (BankingAPIHandler,), {
         "service": service,
     })
