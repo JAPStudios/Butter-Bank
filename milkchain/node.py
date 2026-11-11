@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Minimal account-based proof-of-work cryptocurrency node. Educational only."""
-import argparse, hashlib, json, threading, time, urllib.request
+import argparse, hashlib, json, os, tempfile, threading, time, urllib.request
 from pathlib import Path
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
@@ -203,6 +203,9 @@ class Chain:
         alloc=cfg.get('genesis_allocations',{})
         if not isinstance(alloc,dict) or any(not ishex(a,32) or not isinstance(v,int) or isinstance(v,bool) or v<0 for a,v in alloc.items()): raise ValueError('invalid genesis allocations')
         self.cfg,self.path=cfg,Path(path); self.id=cfg['chain_id']; self.diff=cfg['difficulty']; self.reward=cfg['block_reward']; self.lock=threading.RLock()
+        self._persistence_uncertain = False
+        if self.path.is_symlink():
+            raise ValueError("chain data file must not be a symbolic link")
         configured_peers=cfg.get('peers',[])
         if not isinstance(configured_peers,list) or any(not isinstance(p,str) for p in configured_peers): raise ValueError('peers must be a list of URLs')
         self.peers=list(dict.fromkeys(p.rstrip('/') for p in configured_peers if p.strip()))
@@ -219,8 +222,50 @@ class Chain:
             self._revalidate_pool()
         else:
             self.blocks=[self.genesis_block()]; self.pool=[]; self.save()
+    def _ensure_persistence_healthy(self):
+        if self._persistence_uncertain:
+            raise RuntimeError(
+                "chain persistence is uncertain; stop and reconcile chain data before continuing"
+            )
+
     def save(self):
-        tmp=self.path.with_suffix('.tmp'); tmp.write_text(json.dumps({'chain_id':self.id,'chain':self.blocks,'mempool':self.pool,'peers':self.peers},indent=2)); tmp.replace(self.path)
+        """Atomically persist chain state and require durable file replacement."""
+        self._ensure_persistence_healthy()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps({
+            "chain_id": self.id,
+            "chain": self.blocks,
+            "mempool": self.pool,
+            "peers": self.peers,
+        }, indent=2).encode("utf-8")
+        descriptor, temporary = tempfile.mkstemp(
+            prefix=self.path.name + ".", suffix=".tmp", dir=self.path.parent
+        )
+        try:
+            if os.name == "posix":
+                os.fchmod(descriptor, 0o600)
+            with os.fdopen(descriptor, "wb") as stream:
+                descriptor = -1
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, self.path)
+            if os.name == "posix":
+                directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+                directory_fd = os.open(self.path.parent, directory_flags)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+        except Exception:
+            self._persistence_uncertain = True
+            if descriptor >= 0:
+                os.close(descriptor)
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+            raise
     def state(self,blocks=None):
         bs=self.blocks if blocks is None else blocks
         bal=dict(bs[0]['transactions'][0]['allocations'])
@@ -292,6 +337,7 @@ class Chain:
             return True
         except (KeyError,TypeError,ValueError,OverflowError): return False
     def add_tx(self,tx):
+        self._ensure_persistence_healthy()
         if not isinstance(tx,dict): return False,'transaction must be a JSON object'
         with self.lock:
             if len(self.pool)>=MAX_MEMPOOL_TXS:
@@ -304,6 +350,7 @@ class Chain:
             if any(x['sender']==tx['sender'] and x['nonce']==tx['nonce'] for x in self.pool):return False,'pending nonce already exists'
             self.pool.append(tx); self.save(); return True,'accepted'
     def mine(self,miner):
+        self._ensure_persistence_healthy()
         if not ishex(miner,32): return None,'miner must be a public key in hex'
         with self.lock:
             bal,nonces=self.state(); chosen=[]; fees=0
@@ -319,6 +366,7 @@ class Chain:
                 b['nonce']+=1
             self.blocks.append(b); chosen_ids={sha(canon(t)) for t in chosen}; self.pool=[t for t in self.pool if sha(canon(t)) not in chosen_ids]; self._revalidate_pool(); self.save(); return b,'mined'
     def accept_block(self,b):
+        self._ensure_persistence_healthy()
         with self.lock:
             candidate=self.blocks+[b]
             if not self.valid_chain(candidate):return False,'invalid block'
@@ -333,6 +381,7 @@ class Chain:
             s,r=tx['sender'],tx['recipient']; bal[s]-=tx['amount']+tx['fee']; bal[r]=bal.get(r,0)+tx['amount']; nonces[s]=tx['nonce']; nonces.setdefault(r,0); accepted.append(tx)
         self.pool=accepted
     def replace(self,bs):
+        self._ensure_persistence_healthy()
         with self.lock:
             if not self.valid_chain(bs):return False,'candidate chain invalid'
             if chain_work(bs,self.diff)<=chain_work(self.blocks,self.diff):return False,'candidate has no greater cumulative work'
