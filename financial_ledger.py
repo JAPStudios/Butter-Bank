@@ -196,6 +196,15 @@ class FinancialLedger:
             result["allow_negative"] = bool(result["allow_negative"])
             return result
 
+    def account_for_owner(self, authenticated_owner_ref, account_id):
+        """Read account metadata only when the authenticated owner matches."""
+        owner_ref = self._text(authenticated_owner_ref, "authenticated owner reference")
+        with self._lock:
+            account = self.account(account_id)
+            if account["owner_ref"] != owner_ref:
+                raise LedgerError("account is not owned by the authenticated principal")
+            return account
+
     def accounts_for_owner(self, owner_ref):
         """Return account metadata for one authenticated owner reference."""
         owner_ref = self._text(owner_ref, "owner reference")
@@ -344,6 +353,16 @@ class FinancialLedger:
                 (account_id, limit),
             ).fetchall()
             return [dict(row) for row in rows]
+
+    def statement_for_owner(self, authenticated_owner_ref, account_id, limit=100):
+        """Return account metadata, exact balance, and journal for its owner."""
+        with self._lock:
+            account = self.account_for_owner(authenticated_owner_ref, account_id)
+            return {
+                "account": account,
+                "balance_minor": self.balance_minor(account_id),
+                "entries": self.journal(account_id, limit),
+            }
 
     def transfer(
         self, authenticated_owner_ref, source_account_id,
