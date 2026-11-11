@@ -58,12 +58,13 @@ class BankingAPITests(unittest.TestCase):
             "currency_code": "JPY",
         })
         self.assertEqual(status, 201)
-        self.assertTrue(body["account_id"])
+        new_account_id = body["account_id"]
+        self.assertTrue(new_account_id)
         status, body = self.request("GET", "/accounts", "token-a")
         self.assertEqual(status, 200)
         self.assertEqual(
             {item["account_id"] for item in body["accounts"]},
-            {self.owner_a, body["account_id"]},
+            {self.owner_a, new_account_id},
         )
         status, body = self.request("GET", "/accounts")
         self.assertEqual(status, 401)
