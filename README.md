@@ -1,8 +1,8 @@
 # Butter Bank
 
-Butter Bank is a financial institution owned by HeLLP.
+Butter Bank is a bank.
 
-This repository contains software for Milkchain, the blockchain for Biscuits. It includes account transaction rules, stake-free Byzantine fault-tolerant consensus, validator admission, validator-set transitions, transaction signing, encrypted Biscuits key storage, and node communication.
+This repository contains Milkchain, the blockchain for Biscuits. Its code covers account transaction rules, stake-free Byzantine fault-tolerant consensus, validator admission, validator-set transitions, transaction signing, encrypted Biscuits key storage, plus node communication.
 
 ## Milkchain
 
