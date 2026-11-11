@@ -194,6 +194,23 @@ class FinancialLedger:
             result["allow_negative"] = bool(result["allow_negative"])
             return result
 
+    def accounts_for_owner(self, owner_ref):
+        """Return account metadata for one authenticated owner reference."""
+        owner_ref = self._text(owner_ref, "owner reference")
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT account_id, owner_ref, currency_code, account_type, "
+                "allow_negative, created_at FROM accounts "
+                "WHERE owner_ref=? ORDER BY created_at, account_id",
+                (owner_ref,),
+            ).fetchall()
+            result = []
+            for row in rows:
+                item = dict(row)
+                item["allow_negative"] = bool(item["allow_negative"])
+                result.append(item)
+            return result
+
     def balance_minor(self, account_id):
         with self._lock:
             self.account(account_id)
@@ -318,6 +335,37 @@ class FinancialLedger:
                 (account_id, limit),
             ).fetchall()
             return [dict(row) for row in rows]
+
+    def transfer(
+        self, authenticated_owner_ref, source_account_id,
+        destination_account_id, amount_minor, idempotency_key,
+        description="Account transfer",
+    ):
+        """Post an owner-authorized internal transfer in one currency.
+
+        authenticated_owner_ref must come from a trusted authentication layer,
+        not directly from an untrusted request field. This method does not
+        initiate or represent external payment-rail settlement.
+        """
+        owner_ref = self._text(authenticated_owner_ref, "authenticated owner reference")
+        source_id = self._text(source_account_id, "source account ID")
+        destination_id = self._text(destination_account_id, "destination account ID")
+        if source_id == destination_id:
+            raise LedgerError("source and destination accounts must differ")
+        if (not isinstance(amount_minor, int) or isinstance(amount_minor, bool)
+                or not 1 <= amount_minor < 2**63):
+            raise LedgerError("transfer amount must be a positive integer")
+        with self._lock:
+            source = self.account(source_id)
+            destination = self.account(destination_id)
+            if source["owner_ref"] != owner_ref:
+                raise LedgerError("source account is not owned by the authenticated principal")
+            if source["currency_code"] != destination["currency_code"]:
+                raise LedgerError("one transfer cannot mix currencies")
+            return self.post(
+                idempotency_key, description,
+                [(source_id, -amount_minor), (destination_id, amount_minor)],
+            )
 
     def close(self):
         with self._lock:
