@@ -1,8 +1,8 @@
 """Loopback-first HTTP API for authenticated Butter Bank ledger operations.
 
-The API accepts opaque bearer credentials only. Identity verification remains
-in the injected BankingService resolver; this server never accepts owner IDs
-from request bodies and does not implement external payment settlement.
+The API accepts opaque bearer credentials only. Credential validation remains
+in the injected BankingService resolver; this server never accepts account-owner
+references from request bodies and does not implement external payment settlement.
 """
 from __future__ import annotations
 
