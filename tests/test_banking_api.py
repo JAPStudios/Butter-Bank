@@ -141,6 +141,54 @@ class BankingAPITests(unittest.TestCase):
         status, body = self.request("DELETE", "/accounts", "token-a")
         self.assertEqual(status, 405)
 
+    def test_duplicate_authorization_headers_are_rejected(self):
+        connection = http.client.HTTPConnection(
+            "127.0.0.1", self.server.server_address[1], timeout=3
+        )
+        connection.putrequest("GET", "/accounts")
+        connection.putheader("Authorization", "Bearer token-a")
+        connection.putheader("Authorization", "Bearer token-b")
+        connection.endheaders()
+        response = connection.getresponse()
+        self.assertEqual(response.status, 401)
+        self.assertEqual(response.getheader("Connection"), "close")
+        response.read()
+        connection.close()
+
+    def test_ambiguous_request_framing_is_rejected(self):
+        connection = http.client.HTTPConnection(
+            "127.0.0.1", self.server.server_address[1], timeout=3
+        )
+        connection.putrequest("POST", "/accounts")
+        connection.putheader("Authorization", "Bearer token-a")
+        connection.putheader("Content-Type", "application/json")
+        connection.putheader("Content-Length", "2")
+        connection.putheader("Content-Length", "2")
+        connection.endheaders()
+        connection.send(b"{}")
+        response = connection.getresponse()
+        self.assertEqual(response.status, 400)
+        self.assertEqual(response.getheader("Connection"), "close")
+        response.read()
+        connection.close()
+
+    def test_transfer_encoding_is_rejected(self):
+        connection = http.client.HTTPConnection(
+            "127.0.0.1", self.server.server_address[1], timeout=3
+        )
+        connection.putrequest("POST", "/accounts")
+        connection.putheader("Authorization", "Bearer token-a")
+        connection.putheader("Content-Type", "application/json")
+        connection.putheader("Content-Length", "2")
+        connection.putheader("Transfer-Encoding", "chunked")
+        connection.endheaders()
+        connection.send(b"{}")
+        response = connection.getresponse()
+        self.assertEqual(response.status, 400)
+        self.assertEqual(response.getheader("Connection"), "close")
+        response.read()
+        connection.close()
+
 
 if __name__ == "__main__":
     unittest.main()
