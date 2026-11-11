@@ -115,6 +115,7 @@ Every supported route requires an `Authorization: Bearer <credential>` header. T
 
 | Method | Route | Purpose |
 |---|---|---|
+| GET | `/currencies` | Read registered currency and asset precision metadata |
 | POST | `/accounts` | Open an account using `currency_code` and optional `account_type` |
 | GET | `/accounts` | List the authenticated owner's accounts |
 | GET | `/accounts/{account_id}/statement?limit=100` | Read an owner's account statement |
