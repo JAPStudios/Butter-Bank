@@ -20,11 +20,35 @@ from engine import ConsensusEngine
 from signer import ConsensusSigner
 from bft_node import (
     BFTAPI, load_validator_key, build_validator_activation,
-    validator_state_path,
+    validator_state_path, create_api_server, DEFAULT_BFT_API_MAX_WORKERS,
 )
 from keygen import generate_keypair
 from consensus import make_vote, validator_set_hash
 from validator_transitions import make_transition_certificate
+
+
+class BFTAPIServerTests(unittest.TestCase):
+    def test_bft_api_uses_bounded_worker_server(self):
+        server = create_api_server(port=0, max_workers=2)
+        try:
+            self.assertEqual(server.server_address[1] > 0, True)
+            self.assertEqual(DEFAULT_BFT_API_MAX_WORKERS, 32)
+        finally:
+            server.server_close()
+
+    def test_bft_api_rejects_non_loopback_bind_addresses(self):
+        for host in ("0.0.0.0", "192.0.2.1"):
+            with self.subTest(host=host), self.assertRaisesRegex(
+                ValueError, "loopback"
+            ):
+                create_api_server(host=host, port=0)
+
+    def test_bft_api_rejects_invalid_ports(self):
+        for port in (-1, 65536, True, "8333"):
+            with self.subTest(port=port), self.assertRaisesRegex(
+                ValueError, "port must be an integer"
+            ):
+                create_api_server(port=port)
 
 
 class BFTChainTests(unittest.TestCase):
