@@ -511,11 +511,28 @@ class API(BaseHTTPRequestHandler):
             else:self.sendj(404,{'error':'not found'})
         except Exception as e:self.sendj(400,{'error':str(e)})
 
+def validate_pow_node_config(cfg):
+    """Reject BFT configs at the legacy proof-of-work node entry point."""
+    if not isinstance(cfg, dict):
+        raise ValueError("configuration must be a JSON object")
+    consensus = cfg.get("consensus", "pow")
+    if consensus != "pow":
+        raise ValueError(
+            "node.py runs the proof-of-work node and cannot load "
+            "consensus={!r}; use bft_node.py for BFT configurations".format(consensus)
+        )
+
+
 def main():
     p=argparse.ArgumentParser();p.add_argument('--config',default='config.json');p.add_argument('--data',default=None);a=p.parse_args()
     cp=Path(a.config)
     if not cp.exists():raise SystemExit('Config missing. Copy config.example.json to config.json and configure it.')
-    cfg=json.loads(cp.read_text()); c=Chain(cfg,a.data or f"data-{cfg.get('port',8333)}.json")
+    cfg=json.loads(cp.read_text())
+    try:
+        validate_pow_node_config(cfg)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    c=Chain(cfg,a.data or f"data-{cfg.get('port',8333)}.json")
     API.chain=c;API.peers=c.peers
     threading.Thread(target=peer_sync_loop,args=(c,),daemon=True).start()
     srv=ThreadingHTTPServer((cfg.get('host','127.0.0.1'),int(cfg.get('port',8333))),API)
