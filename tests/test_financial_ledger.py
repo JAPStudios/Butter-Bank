@@ -98,6 +98,68 @@ class FinancialLedgerTests(unittest.TestCase):
         self.assertEqual(self.ledger.balance_minor(self.usd_a), 250)
         self.assertEqual(len(self.ledger.journal(self.usd_a)), 1)
 
+    def test_owner_account_listing_is_scoped(self):
+        accounts = self.ledger.accounts_for_owner("customer-a")
+        self.assertEqual(
+            {item["account_id"] for item in accounts},
+            {self.usd_a, self.jpy_a},
+        )
+        self.assertTrue(all(item["owner_ref"] == "customer-a" for item in accounts))
+
+    def test_internal_transfer_checks_owner_and_preserves_balances(self):
+        self.ledger.post("fund-a", "Fund source account", [
+            (self.usd_a, 1200), (self.usd_clearing, -1200),
+        ])
+        transaction_id = self.ledger.transfer(
+            "customer-a", self.usd_a, self.usd_b, 700, "transfer-1"
+        )
+        self.assertTrue(transaction_id)
+        self.assertEqual(self.ledger.balance_minor(self.usd_a), 500)
+        self.assertEqual(self.ledger.balance_minor(self.usd_b), 700)
+        self.assertEqual(
+            self.ledger.transfer(
+                "customer-a", self.usd_a, self.usd_b, 700, "transfer-1"
+            ),
+            transaction_id,
+        )
+        self.assertEqual(self.ledger.balance_minor(self.usd_a), 500)
+        self.assertEqual(self.ledger.balance_minor(self.usd_b), 700)
+
+    def test_internal_transfer_rejects_unauthorized_source(self):
+        self.ledger.post("fund-a", "Fund source account", [
+            (self.usd_a, 1200), (self.usd_clearing, -1200),
+        ])
+        with self.assertRaisesRegex(LedgerError, "not owned"):
+            self.ledger.transfer(
+                "customer-b", self.usd_a, self.usd_b, 100, "unauthorized-transfer"
+            )
+        self.assertEqual(self.ledger.balance_minor(self.usd_a), 1200)
+        self.assertEqual(self.ledger.balance_minor(self.usd_b), 0)
+
+    def test_internal_transfer_rejects_currency_mismatch_and_overdraft(self):
+        self.ledger.post("fund-a", "Fund source account", [
+            (self.usd_a, 100), (self.usd_clearing, -100),
+        ])
+        with self.assertRaisesRegex(LedgerError, "mix currencies"):
+            self.ledger.transfer(
+                "customer-a", self.usd_a, self.jpy_b, 1, "cross-currency"
+            )
+        with self.assertRaises(InsufficientFunds):
+            self.ledger.transfer(
+                "customer-a", self.usd_a, self.usd_b, 101, "overdraft-transfer"
+            )
+        self.assertEqual(self.ledger.balance_minor(self.usd_a), 100)
+        self.assertEqual(self.ledger.balance_minor(self.usd_b), 0)
+
+    def test_internal_transfer_rejects_invalid_amount(self):
+        for amount in (0, -1, True, 1.5):
+            with self.subTest(amount=amount):
+                with self.assertRaises(LedgerError):
+                    self.ledger.transfer(
+                        "customer-a", self.usd_a, self.usd_b, amount,
+                        "invalid-" + repr(amount),
+                    )
+
     @unittest.skipUnless(os.name == "posix", "POSIX file permissions")
     def test_database_file_is_created_with_private_permissions(self):
         self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o600)
