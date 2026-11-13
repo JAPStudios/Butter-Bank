@@ -132,7 +132,7 @@ fn failed_persistence_does_not_advance_in_memory_chain() {
         "milkchain-test",
         validators(&keys),
         BTreeMap::new(),
-        Some(path),
+        Some(path.clone()),
     ).unwrap();
 
     std::fs::remove_file(&path).unwrap();
