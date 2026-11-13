@@ -72,3 +72,76 @@ fn persisted_chain_reloads_and_revalidates() {
     assert_eq!(restored.height(), 1);
     assert!(restored.validate_blocks(restored.blocks()));
 }
+
+#[test]
+fn exactly_two_thirds_is_not_a_quorum() {
+    for validator_count in [3usize, 6usize] {
+        let keys: Vec<_> = (0..validator_count).map(|_| key()).collect();
+        let mut chain = BftChain::new(
+            "milkchain-test",
+            validators(&keys),
+            BTreeMap::new(),
+            None,
+        ).unwrap();
+        let header = chain.propose(vec![], 1, 0).unwrap();
+        let hash = BftChain::block_hash(&header).unwrap();
+
+        let exactly_two_thirds = validator_count * 2 / 3;
+        let insufficient_prevotes: Vec<_> = keys[..exactly_two_thirds]
+            .iter()
+            .map(|k| sign_vote(k, "milkchain-test", 1, 0, "prevote", &hash).unwrap())
+            .collect();
+        let insufficient_precommits: Vec<_> = keys[..exactly_two_thirds]
+            .iter()
+            .map(|k| sign_vote(k, "milkchain-test", 1, 0, "precommit", &hash).unwrap())
+            .collect();
+        assert!(matches!(
+            chain.commit(
+                header.clone(),
+                insufficient_prevotes,
+                insufficient_precommits,
+            ),
+            Err(ChainError::Consensus(_))
+        ));
+
+        let supermajority = exactly_two_thirds + 1;
+        let sufficient_prevotes: Vec<_> = keys[..supermajority]
+            .iter()
+            .map(|k| sign_vote(k, "milkchain-test", 1, 0, "prevote", &hash).unwrap())
+            .collect();
+        let sufficient_precommits: Vec<_> = keys[..supermajority]
+            .iter()
+            .map(|k| sign_vote(k, "milkchain-test", 1, 0, "precommit", &hash).unwrap())
+            .collect();
+        assert!(chain.commit(
+            header,
+            sufficient_prevotes,
+            sufficient_precommits,
+        ).is_ok());
+    }
+}
+
+#[test]
+fn failed_persistence_does_not_advance_in_memory_chain() {
+    let keys: Vec<_> = (0..4).map(|_| key()).collect();
+    let directory = tempfile::tempdir().unwrap();
+    let parent = directory.path().join("ledger-dir");
+    std::fs::create_dir(&parent).unwrap();
+    let path = parent.join("ledger.json");
+    let mut chain = BftChain::new(
+        "milkchain-test",
+        validators(&keys),
+        BTreeMap::new(),
+        Some(path.clone()),
+    ).unwrap();
+
+    std::fs::remove_file(&path).unwrap();
+    std::fs::remove_dir(&parent).unwrap();
+    std::fs::write(&parent, b"occupy the expected directory path").unwrap();
+
+    let header = chain.propose(vec![], 1, 0).unwrap();
+    let (prevotes, precommits) = certs(&keys, &chain, &header);
+    assert!(chain.commit(header, prevotes, precommits).is_err());
+    assert_eq!(chain.height(), 0);
+    assert_eq!(chain.blocks().len(), 1);
+}
