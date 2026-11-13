@@ -67,7 +67,6 @@ class PeerSyncLoopTests(unittest.TestCase):
                 bft_node.bft_peer_sync_loop(chain, engine, interval=3, stop_event=stop)
 
         self.assertIn("unavailable", "\\n".join(captured.output))
-
         self.assertEqual(contacted, ["unavailable", "healthy"])
         self.assertEqual(engine.snapshots, [[{"height": 0}]])
         self.assertEqual(engine.retries, 1)
@@ -110,6 +109,61 @@ class PeerSyncLoopTests(unittest.TestCase):
         log_output = "\\n".join(captured.output)
         self.assertIn("BFT chain catch-up failed", log_output)
         self.assertIn("BFT pending finalization retry failed", log_output)
+
+    def test_validator_set_recovery_is_retried_after_transient_failure(self):
+        chain = _Chain()
+        chain.validators = [{"public_key": "validator-a", "voting_power": 1}]
+        chain.validators_hash = "new-validator-set"
+        chain.validator_activation_height = 2
+        stop = _StopAfterCycles(2)
+
+        class RecoveringEngine(_Engine):
+            def __init__(self):
+                super().__init__()
+                self.validator_set_hash = "old-validator-set"
+                self.validator_activation_height = 1
+                self.pending_validator_recovery = True
+                self.activations = []
+
+            def activate_validator_set(
+                self, validators, signer, activation_height, chain_height
+            ):
+                self.activations.append(
+                    (validators, signer, activation_height, chain_height)
+                )
+                self.validator_set_hash = chain.validators_hash
+                self.validator_activation_height = activation_height
+                self.pending_validator_recovery = False
+
+        engine = RecoveringEngine()
+        recovery_calls = []
+
+        def recover():
+            recovery_calls.append(True)
+            if len(recovery_calls) == 1:
+                raise OSError("temporary validator-state recovery failure")
+            return {
+                "validators": chain.validators,
+                "signer": None,
+                "activation_height": chain.validator_activation_height,
+                "chain_height": len(chain.blocks),
+            }
+
+        with patch.object(bft_node, "synchronize_peer", return_value=True):
+            with self.assertLogs(bft_node.LOGGER, level="ERROR") as captured:
+                bft_node.bft_peer_sync_loop(
+                    chain, engine, interval=3, stop_event=stop,
+                    on_validator_set=recover,
+                )
+
+        self.assertEqual(len(recovery_calls), 2)
+        self.assertEqual(len(engine.activations), 1)
+        self.assertEqual(engine.activations[0][2:], (2, 1))
+        self.assertEqual(engine.snapshots, [[{"height": 0}]])
+        self.assertIn(
+            "BFT chain catch-up failed; will retry next cycle",
+            "\\n".join(captured.output),
+        )
 
 
 if __name__ == "__main__":
