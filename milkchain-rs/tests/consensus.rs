@@ -135,6 +135,7 @@ fn failed_persistence_does_not_advance_in_memory_chain() {
         Some(path),
     ).unwrap();
 
+    std::fs::remove_file(&path).unwrap();
     std::fs::remove_dir(&parent).unwrap();
     std::fs::write(&parent, b"occupy the expected directory path").unwrap();
 
