@@ -7,7 +7,7 @@ This crate is the Rust implementation of Milkchain's deterministic account ledge
 - Ed25519-signed account transfers, chain binding, nonce checks, and integer-only balances.
 - Deterministic SHA-256 block hashes over canonical serialized block headers.
 - Validator voting power and separately verified prevote and precommit certificates.
-- Commit threshold of at least two-thirds of configured validator voting power.
+- Commit threshold requires strictly more than two-thirds of configured validator voting power.
 - Rejection of duplicate/unknown validators, invalid signatures, replayed votes, wrong-chain proposals, invalid transactions, and broken block links.
 - Full ledger replay validation and atomic durable local persistence.
 
