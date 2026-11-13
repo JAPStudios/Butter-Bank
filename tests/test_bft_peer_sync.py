@@ -17,6 +17,19 @@ class _StopAfterCycle:
         return True
 
 
+class _StopAfterCycles:
+    def __init__(self, cycles):
+        self.cycles = cycles
+        self.waited = []
+
+    def is_set(self):
+        return len(self.waited) >= self.cycles
+
+    def wait(self, interval):
+        self.waited.append(interval)
+        return len(self.waited) >= self.cycles
+
+
 class _Chain:
     def __init__(self):
         self.peers = ["unavailable", "healthy"]
@@ -68,6 +81,35 @@ class PeerSyncLoopTests(unittest.TestCase):
                         _Chain(), _Engine(), interval=interval,
                         stop_event=_StopAfterCycle(),
                     )
+
+    def test_catch_up_and_finalization_failures_are_retried_next_cycle(self):
+        chain = _Chain()
+        stop = _StopAfterCycles(2)
+
+        class FlakyEngine(_Engine):
+            def catch_up_chain(self, blocks):
+                self.snapshots.append(blocks)
+                if len(self.snapshots) == 1:
+                    raise OSError("temporary chain catch-up failure")
+
+            def retry_pending_finalization(self):
+                self.retries += 1
+                if self.retries == 1:
+                    raise OSError("temporary finalization storage failure")
+
+        engine = FlakyEngine()
+        with patch.object(bft_node, "synchronize_peer", return_value=True):
+            with self.assertLogs(bft_node.LOGGER, level="ERROR") as captured:
+                bft_node.bft_peer_sync_loop(
+                    chain, engine, interval=3, stop_event=stop
+                )
+
+        self.assertEqual(len(engine.snapshots), 2)
+        self.assertEqual(engine.retries, 2)
+        self.assertEqual(stop.waited, [3.0, 3.0])
+        log_output = "\\n".join(captured.output)
+        self.assertIn("BFT chain catch-up failed", log_output)
+        self.assertIn("BFT pending finalization retry failed", log_output)
 
 
 if __name__ == "__main__":
